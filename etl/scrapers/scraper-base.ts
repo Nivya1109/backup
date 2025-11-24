@@ -62,21 +62,22 @@ export abstract class BaseScraper {
       // Launch headless browser
       browser = await chromium.launch({
         headless: true,
-        timeout: 30000,
+        timeout: 60000,
       });
 
       const page = await browser.newPage({
         userAgent: this.userAgent,
       });
 
-      // Navigate and wait for network to be idle
+      // Navigate with more lenient wait strategy
+      // Use 'domcontentloaded' instead of 'networkidle' for sites with continuous network activity
       await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 30000,
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
       });
 
-      // Wait a bit more for any lazy-loaded content
-      await page.waitForTimeout(2000);
+      // Wait for content to render
+      await page.waitForTimeout(3000);
 
       // Get the rendered HTML
       const html = await page.content();
