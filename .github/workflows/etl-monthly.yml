@@ -36,13 +36,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma Client
-        run: npx prisma generate
+        run: pnpm prisma generate
 
       - name: Run ETL Pipeline
         env:
@@ -51,11 +68,11 @@ jobs:
           MEILISEARCH_API_KEY: ${{ secrets.MEILISEARCH_API_KEY }}
         run: |
           if [ "${{ inputs.dry_run }}" == "true" ]; then
-            npm run etl:fetch -- --dry-run
+            pnpm etl:fetch -- --dry-run
           elif [ -n "${{ inputs.source }}" ]; then
-            npm run etl:fetch -- --source=${{ inputs.source }}
+            pnpm etl:fetch -- --source=${{ inputs.source }}
           else
-            npm run etl:fetch
+            pnpm etl:fetch
           fi
 
       - name: Upload ETL logs
