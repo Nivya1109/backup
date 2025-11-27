@@ -93,15 +93,14 @@ export class GarminScraper extends BaseScraper {
                     $('h1[class*="product"]').first().text().trim() ||
                     $('h1').first().text().trim();
 
-      const description = $('meta[name="description"]').attr('content') ||
-                         $('meta[property="og:description"]').attr('content') ||
-                         '';
+      // Use enhanced description extraction
+      const { shortSummary, description, technicalSpecs } = this.extractDetailedDescription($);
 
-      // Extract price
+      // Extract price with advanced method
       let priceMin = null;
       let priceMax = null;
 
-      // Try JSON-LD structured data
+      // Try JSON-LD structured data first
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const jsonLd = JSON.parse($(el).html() || '{}');
@@ -122,24 +121,11 @@ export class GarminScraper extends BaseScraper {
         }
       });
 
-      // Try price selectors
+      // If no price from JSON-LD, use advanced price extraction (includes Buy buttons)
       if (!priceMin) {
-        const priceSelectors = [
-          '[class*="price"]',
-          '[data-price]',
-          '.product-price',
-          '.price-value',
-        ];
-
-        for (const selector of priceSelectors) {
-          const priceText = $(selector).first().text().match(/\$?([\d,]+)\.?(\d{2})?/);
-          if (priceText) {
-            const dollars = priceText[1].replace(/,/g, '');
-            const cents = priceText[2] || '00';
-            priceMin = parseInt(dollars) * 100 + parseInt(cents);
-            break;
-          }
-        }
+        const advancedPrices = this.extractPriceAdvanced($);
+        priceMin = advancedPrices.min;
+        priceMax = advancedPrices.max;
       }
 
       // Extract specs/components
@@ -179,10 +165,23 @@ export class GarminScraper extends BaseScraper {
 
       console.log(`✓ Successfully scraped: ${title}`);
 
+      // If we have technical specs, add them to components
+      if (technicalSpecs) {
+        const specsArray = technicalSpecs.split('|').map(s => s.trim()).filter(s => s.length > 0);
+        specsArray.forEach(spec => {
+          components.push({
+            type: 'HARDWARE',
+            name: spec.split(':')[0]?.trim() || spec,
+            spec: spec.includes(':') ? spec.split(':')[1]?.trim() : undefined,
+            required: true,
+          });
+        });
+      }
+
       return {
         name: title,
         slug: slugify(title),
-        shortSummary: description?.substring(0, 250) || undefined,
+        shortSummary: shortSummary || description?.substring(0, 250) || undefined,
         description: description || undefined,
         costMinUSD: priceMin,
         costMaxUSD: priceMax || priceMin,

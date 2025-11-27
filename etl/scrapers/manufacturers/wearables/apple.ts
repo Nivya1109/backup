@@ -101,15 +101,14 @@ export class AppleScraper extends BaseScraper {
                     $('h1.typography-headline').first().text().trim() ||
                     $('h1').first().text().trim();
 
-      const description = $('meta[name="description"]').attr('content') ||
-                         $('meta[property="og:description"]').attr('content') ||
-                         '';
+      // Use enhanced description extraction
+      const { shortSummary, description, technicalSpecs } = this.extractDetailedDescription($);
 
-      // Extract pricing from meta tags or structured data
+      // Extract pricing with advanced method (includes Buy button search)
       let priceMin = null;
       let priceMax = null;
 
-      // Try to extract price from structured data
+      // Try to extract price from structured data first
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const jsonLd = JSON.parse($(el).html() || '{}');
@@ -130,25 +129,11 @@ export class AppleScraper extends BaseScraper {
         }
       });
 
-      // Try to extract price from page text with multiple selectors
+      // If no price from JSON-LD, use advanced price extraction (includes Buy buttons)
       if (!priceMin) {
-        const priceSelectors = [
-          '.typography-hero-prices',
-          '.pricing',
-          '[class*="price"]',
-          '[data-autom="prices"]',
-          '.as-price-currentprice',
-          '.rf-bfe-dimension-price',
-          'span[data-dimension-price]',
-        ];
-
-        for (const selector of priceSelectors) {
-          const priceText = $(selector).first().text().match(/\$(\d+)/);
-          if (priceText) {
-            priceMin = parseInt(priceText[1]) * 100;
-            break;
-          }
-        }
+        const advancedPrices = this.extractPriceAdvanced($);
+        priceMin = advancedPrices.min;
+        priceMax = advancedPrices.max;
       }
 
       // Extract tech specs if available
@@ -190,10 +175,23 @@ export class AppleScraper extends BaseScraper {
 
       console.log(`✓ Successfully scraped: ${title}`);
 
+      // If we have technical specs, add them to components
+      if (technicalSpecs) {
+        const specsArray = technicalSpecs.split('|').map(s => s.trim()).filter(s => s.length > 0);
+        specsArray.forEach(spec => {
+          components.push({
+            type: 'HARDWARE',
+            name: spec.split(':')[0]?.trim() || spec,
+            spec: spec.includes(':') ? spec.split(':')[1]?.trim() : undefined,
+            required: true,
+          });
+        });
+      }
+
       const sipData: SIPData = {
         name: title,
         slug: slugify(title),
-        shortSummary: description?.substring(0, 250) || undefined,
+        shortSummary: shortSummary || description?.substring(0, 250) || undefined,
         description: description || undefined,
         costMinUSD: priceMin,
         costMaxUSD: priceMax || priceMin,
