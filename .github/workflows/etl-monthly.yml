@@ -56,7 +56,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Generate Prisma Client
         run: pnpm prisma generate
@@ -64,8 +64,11 @@ jobs:
       - name: Run ETL Pipeline
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          MEILISEARCH_HOST: ${{ secrets.MEILISEARCH_HOST }}
-          MEILISEARCH_API_KEY: ${{ secrets.MEILISEARCH_API_KEY }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          TYPESENSE_HOST: ${{ secrets.TYPESENSE_HOST }}
+          TYPESENSE_PORT: ${{ secrets.TYPESENSE_PORT }}
+          TYPESENSE_PROTOCOL: ${{ secrets.TYPESENSE_PROTOCOL }}
+          TYPESENSE_API_KEY: ${{ secrets.TYPESENSE_API_KEY }}
         run: |
           if [ "${{ inputs.dry_run }}" == "true" ]; then
             pnpm etl:fetch -- --dry-run
