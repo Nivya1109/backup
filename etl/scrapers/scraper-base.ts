@@ -62,21 +62,22 @@ export abstract class BaseScraper {
       // Launch headless browser
       browser = await chromium.launch({
         headless: true,
-        timeout: 30000,
+        timeout: 60000,
       });
 
       const page = await browser.newPage({
         userAgent: this.userAgent,
       });
 
-      // Navigate and wait for network to be idle
+      // Navigate with more lenient wait strategy
+      // Use 'domcontentloaded' instead of 'networkidle' for sites with continuous network activity
       await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 30000,
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
       });
 
-      // Wait a bit more for any lazy-loaded content
-      await page.waitForTimeout(2000);
+      // Wait for content to render
+      await page.waitForTimeout(3000);
 
       // Get the rendered HTML
       const html = await page.content();
@@ -184,5 +185,226 @@ export abstract class BaseScraper {
       .replace(/\s+/g, ' ')
       .replace(/\n/g, ' ')
       .trim();
+  }
+
+  /**
+   * Advanced price extraction - looks for price in multiple locations
+   * including Buy buttons, price containers, and data attributes
+   */
+  protected extractPriceAdvanced($: cheerio.CheerioAPI): { min: number | null; max: number | null } {
+    const prices: number[] = [];
+
+    // Strategy 1: Common price selectors
+    const priceSelectors = [
+      '[data-price]',
+      '[data-product-price]',
+      '.price',
+      '.product-price',
+      '[class*="price"]',
+      '[class*="Price"]',
+      '[itemprop="price"]',
+      '[data-autom="product-price"]',
+    ];
+
+    for (const selector of priceSelectors) {
+      $(selector).each((_, el) => {
+        const priceText = $(el).text() || $(el).attr('content') || $(el).attr('data-price') || '';
+        const price = this.extractPrice(priceText);
+        if (price) prices.push(price);
+      });
+    }
+
+    // Strategy 2: Look for Buy/Add to Cart buttons with price nearby
+    const buyButtonSelectors = [
+      'button[class*="buy"]',
+      'button[class*="cart"]',
+      'a[class*="buy"]',
+      'a[class*="cart"]',
+      '[data-autom*="buy"]',
+      '[data-autom*="cart"]',
+    ];
+
+    for (const selector of buyButtonSelectors) {
+      $(selector).each((_, el) => {
+        // Check button text itself
+        const buttonText = $(el).text();
+        let price = this.extractPrice(buttonText);
+        if (price) {
+          prices.push(price);
+          return;
+        }
+
+        // Check parent container
+        const parent = $(el).parent();
+        const parentText = parent.text();
+        price = this.extractPrice(parentText);
+        if (price) prices.push(price);
+
+        // Check siblings
+        const siblings = $(el).siblings();
+        siblings.each((_, sibling) => {
+          const siblingText = $(sibling).text();
+          const sibPrice = this.extractPrice(siblingText);
+          if (sibPrice) prices.push(sibPrice);
+        });
+      });
+    }
+
+    // Strategy 3: Look for "from $X" or "starting at $X" patterns
+    const bodyText = $('body').text();
+    const fromPatterns = [
+      /from\s+\$?([\d,]+\.?\d*)/gi,
+      /starting at\s+\$?([\d,]+\.?\d*)/gi,
+      /as low as\s+\$?([\d,]+\.?\d*)/gi,
+    ];
+
+    for (const pattern of fromPatterns) {
+      const matches = bodyText.matchAll(pattern);
+      for (const match of matches) {
+        const price = this.extractPrice(match[1]);
+        if (price) prices.push(price);
+      }
+    }
+
+    // Return min and max prices
+    if (prices.length === 0) {
+      return { min: null, max: null };
+    }
+
+    return {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+    };
+  }
+
+  /**
+   * Extract detailed product description from multiple sources
+   * Looks for description meta tags, product details, tech specs, etc.
+   */
+  protected extractDetailedDescription($: cheerio.CheerioAPI): {
+    shortSummary: string | null;
+    description: string | null;
+    technicalSpecs: string | null;
+  } {
+    let shortSummary: string | null = null;
+    let description: string | null = null;
+    let technicalSpecs: string | null = null;
+
+    // Extract short summary from meta tags
+    const metaDescription = $('meta[name="description"]').attr('content') ||
+                           $('meta[property="og:description"]').attr('content') ||
+                           $('meta[name="twitter:description"]').attr('content');
+
+    if (metaDescription) {
+      shortSummary = this.cleanText(metaDescription);
+      if (shortSummary && shortSummary.length > 500) {
+        shortSummary = shortSummary.substring(0, 497) + '...';
+      }
+    }
+
+    // Extract main description from common selectors
+    const descriptionSelectors = [
+      '[class*="description"]',
+      '[class*="Description"]',
+      '[class*="overview"]',
+      '[class*="Overview"]',
+      '[data-autom*="description"]',
+      '[itemprop="description"]',
+      '.product-info',
+      '.product-details',
+      '#product-description',
+    ];
+
+    for (const selector of descriptionSelectors) {
+      const element = $(selector).first();
+      if (element.length > 0) {
+        const text = element.text().trim();
+        if (text.length > 50) { // Only use if substantial
+          description = this.cleanText(text);
+          if (description && description.length > 2000) {
+            description = description.substring(0, 1997) + '...';
+          }
+          break;
+        }
+      }
+    }
+
+    // If no description found, use first substantial paragraph
+    if (!description) {
+      $('p').each((_, el) => {
+        const text = $(el).text().trim();
+        if (text.length > 100) {
+          description = this.cleanText(text);
+          if (description && description.length > 2000) {
+            description = description.substring(0, 1997) + '...';
+          }
+          return false; // break
+        }
+      });
+    }
+
+    // Extract technical specifications
+    const techSpecSelectors = [
+      '[class*="spec"]',
+      '[class*="Spec"]',
+      '[class*="technical"]',
+      '[class*="Technical"]',
+      '[class*="feature"]',
+      '[class*="Feature"]',
+      '.tech-details',
+      '#specifications',
+      '#tech-specs',
+    ];
+
+    const techSpecs: string[] = [];
+    for (const selector of techSpecSelectors) {
+      $(selector).each((_, el) => {
+        const text = $(el).text().trim();
+        if (text.length > 20 && text.length < 500) {
+          techSpecs.push(this.cleanText(text) || '');
+        }
+      });
+    }
+
+    if (techSpecs.length > 0) {
+      technicalSpecs = techSpecs.slice(0, 10).join(' | '); // Join first 10 specs
+      if (technicalSpecs.length > 2000) {
+        technicalSpecs = technicalSpecs.substring(0, 1997) + '...';
+      }
+    }
+
+    return {
+      shortSummary,
+      description,
+      technicalSpecs,
+    };
+  }
+
+  /**
+   * Extract product features as an array
+   */
+  protected extractFeatures($: cheerio.CheerioAPI): string[] {
+    const features: string[] = [];
+
+    // Look for feature lists
+    const featureSelectors = [
+      '[class*="feature"] li',
+      '[class*="Feature"] li',
+      '.highlights li',
+      '.key-features li',
+      '[data-autom*="feature"] li',
+    ];
+
+    for (const selector of featureSelectors) {
+      $(selector).each((_, el) => {
+        const text = $(el).text().trim();
+        if (text.length > 5 && text.length < 200) {
+          features.push(this.cleanText(text) || '');
+        }
+      });
+      if (features.length > 0) break; // Use first successful selector
+    }
+
+    return features.slice(0, 20); // Limit to 20 features
   }
 }
