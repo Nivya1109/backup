@@ -8,146 +8,121 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const category = searchParams.get('category') || ''
 
-    // Total SIPs count
-    const totalSIPs = await prisma.sIP.count({
-      where: category
-        ? {
-            categories: {
-              some: {
-                category: {
-                  name: { equals: category, mode: 'insensitive' as const },
-                },
-              },
+    const categoryFilter = category
+      ? {
+          categories: {
+            some: {
+              category: { name: { equals: category, mode: 'insensitive' as const } },
             },
-          }
-        : {},
-    })
+          },
+        }
+      : {}
 
-    // SIPs per category
-    const sipsPerCategory = category
+    // Total libraries
+    const totalLibraries = await prisma.library.count({ where: categoryFilter })
+
+    // Libraries per category
+    const librariesPerCategory = category
       ? await prisma.$queryRaw<Array<{ category: string; count: bigint }>>`
-          SELECT c.name as category, COUNT(sc."sipId")::bigint as count
-          FROM "SIP_Category" sc
-          JOIN "Category" c ON c.id = sc."categoryId"
+          SELECT c.name as category, COUNT(lc."libraryId")::bigint as count
+          FROM "Library_Category" lc
+          JOIN "Category" c ON c.id = lc."categoryId"
           WHERE c.name ILIKE ${`%${category}%`}
           GROUP BY c.name
           ORDER BY count DESC
         `
       : await prisma.$queryRaw<Array<{ category: string; count: bigint }>>`
-          SELECT c.name as category, COUNT(sc."sipId")::bigint as count
-          FROM "SIP_Category" sc
-          JOIN "Category" c ON c.id = sc."categoryId"
+          SELECT c.name as category, COUNT(lc."libraryId")::bigint as count
+          FROM "Library_Category" lc
+          JOIN "Category" c ON c.id = lc."categoryId"
           GROUP BY c.name
           ORDER BY count DESC
         `
 
-    // OS distribution per category
-    const osDistribution = category
-      ? await prisma.$queryRaw<Array<{ category: string; os: string; count: bigint }>>`
-          SELECT c.name as category, o.name as os, COUNT(*)::bigint as count
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "SIP_OS" so ON so."sipId" = s.id
-          JOIN "OperatingSystem" o ON o.id = so."osId"
-          JOIN "Category" c ON c.id = sc."categoryId"
+    // Libraries per language
+    const librariesPerLanguage = category
+      ? await prisma.$queryRaw<Array<{ language: string; count: bigint }>>`
+          SELECT l.name as language, COUNT(ll."libraryId")::bigint as count
+          FROM "Library_Language" ll
+          JOIN "Language" l ON l.id = ll."languageId"
+          JOIN "Library_Category" lc ON lc."libraryId" = ll."libraryId"
+          JOIN "Category" c ON c.id = lc."categoryId"
           WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY c.name, o.name
+          GROUP BY l.name
+          ORDER BY count DESC
+        `
+      : await prisma.$queryRaw<Array<{ language: string; count: bigint }>>`
+          SELECT l.name as language, COUNT(ll."libraryId")::bigint as count
+          FROM "Library_Language" ll
+          JOIN "Language" l ON l.id = ll."languageId"
+          GROUP BY l.name
+          ORDER BY count DESC
+        `
+
+    // Platform distribution
+    const platformDistribution = category
+      ? await prisma.$queryRaw<Array<{ category: string; platform: string; count: bigint }>>`
+          SELECT c.name as category, p.name as platform, COUNT(*)::bigint as count
+          FROM "Library_Category" lc
+          JOIN "Library" lib ON lib.id = lc."libraryId"
+          JOIN "Library_Platform" lp ON lp."libraryId" = lib.id
+          JOIN "Platform" p ON p.id = lp."platformId"
+          JOIN "Category" c ON c.id = lc."categoryId"
+          WHERE c.name ILIKE ${`%${category}%`}
+          GROUP BY c.name, p.name
           ORDER BY c.name, count DESC
         `
-      : await prisma.$queryRaw<Array<{ category: string; os: string; count: bigint }>>`
-          SELECT c.name as category, o.name as os, COUNT(*)::bigint as count
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "SIP_OS" so ON so."sipId" = s.id
-          JOIN "OperatingSystem" o ON o.id = so."osId"
-          JOIN "Category" c ON c.id = sc."categoryId"
-          GROUP BY c.name, o.name
+      : await prisma.$queryRaw<Array<{ category: string; platform: string; count: bigint }>>`
+          SELECT c.name as category, p.name as platform, COUNT(*)::bigint as count
+          FROM "Library_Category" lc
+          JOIN "Library" lib ON lib.id = lc."libraryId"
+          JOIN "Library_Platform" lp ON lp."libraryId" = lib.id
+          JOIN "Platform" p ON p.id = lp."platformId"
+          JOIN "Category" c ON c.id = lc."categoryId"
+          GROUP BY c.name, p.name
           ORDER BY c.name, count DESC
         `
 
-    // Average cost per category
-    const avgCostPerCategory = category
-      ? await prisma.$queryRaw<
-          Array<{ category: string; avgMin: number | null; avgMax: number | null }>
-        >`
-          SELECT
-            c.name as category,
-            AVG(s."costMinUSD")::numeric as "avgMin",
-            AVG(s."costMaxUSD")::numeric as "avgMax"
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "Category" c ON c.id = sc."categoryId"
-          WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY c.name
-          ORDER BY c.name
-        `
-      : await prisma.$queryRaw<
-          Array<{ category: string; avgMin: number | null; avgMax: number | null }>
-        >`
-          SELECT
-            c.name as category,
-            AVG(s."costMinUSD")::numeric as "avgMin",
-            AVG(s."costMaxUSD")::numeric as "avgMax"
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "Category" c ON c.id = sc."categoryId"
-          GROUP BY c.name
-          ORDER BY c.name
-        `
+    // Libraries by organization
+    const librariesByOrg = await prisma.$queryRaw<Array<{ org: string; count: bigint }>>`
+      SELECT o.name as org, COUNT(lib.id)::bigint as count
+      FROM "Organization" o
+      JOIN "Library" lib ON lib."organizationId" = o.id
+      GROUP BY o.name
+      ORDER BY count DESC
+      LIMIT 10
+    `
 
-    // Component counts
-    const componentStats = category
-      ? await prisma.$queryRaw<Array<{ category: string; hardware: bigint; software: bigint }>>`
-          SELECT
-            c.name as category,
-            COUNT(CASE WHEN comp.type = 'HARDWARE' THEN 1 END)::bigint as hardware,
-            COUNT(CASE WHEN comp.type = 'SOFTWARE' THEN 1 END)::bigint as software
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "Component" comp ON comp."sipId" = s.id
-          JOIN "Category" c ON c.id = sc."categoryId"
-          WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY c.name
-          ORDER BY c.name
-        `
-      : await prisma.$queryRaw<Array<{ category: string; hardware: bigint; software: bigint }>>`
-          SELECT
-            c.name as category,
-            COUNT(CASE WHEN comp.type = 'HARDWARE' THEN 1 END)::bigint as hardware,
-            COUNT(CASE WHEN comp.type = 'SOFTWARE' THEN 1 END)::bigint as software
-          FROM "SIP_Category" sc
-          JOIN "SIP" s ON s.id = sc."sipId"
-          JOIN "Component" comp ON comp."sipId" = s.id
-          JOIN "Category" c ON c.id = sc."categoryId"
-          GROUP BY c.name
-          ORDER BY c.name
-        `
+    // Free vs paid counts
+    const freeCount = await prisma.library.count({ where: { ...categoryFilter, costMinUSD: 0 } })
+    const paidCount = await prisma.library.count({
+      where: { ...categoryFilter, costMinUSD: { gt: 0 } },
+    })
 
-    // Transform bigint to number for JSON serialization
-    const transformedData = {
-      totalSIPs,
-      sipsPerCategory: sipsPerCategory.map((item) => ({
-        category: item.category,
-        count: Number(item.count),
+    return NextResponse.json({
+      totalLibraries,
+      librariesPerCategory: librariesPerCategory.map((r) => ({
+        category: r.category,
+        count: Number(r.count),
       })),
-      osDistribution: osDistribution.map((item) => ({
-        category: item.category,
-        os: item.os,
-        count: Number(item.count),
+      librariesPerLanguage: librariesPerLanguage.map((r) => ({
+        language: r.language,
+        count: Number(r.count),
       })),
-      avgCostPerCategory: avgCostPerCategory.map((item) => ({
-        category: item.category,
-        avgMin: item.avgMin ? Number(item.avgMin) : null,
-        avgMax: item.avgMax ? Number(item.avgMax) : null,
+      platformDistribution: platformDistribution.map((r) => ({
+        category: r.category,
+        platform: r.platform,
+        count: Number(r.count),
       })),
-      componentStats: componentStats.map((item) => ({
-        category: item.category,
-        hardware: Number(item.hardware),
-        software: Number(item.software),
+      librariesByOrg: librariesByOrg.map((r) => ({
+        org: r.org,
+        count: Number(r.count),
       })),
-    }
-
-    return NextResponse.json(transformedData)
+      licenseBreakdown: {
+        free: freeCount,
+        paid: paidCount,
+      },
+    })
   } catch (error) {
     console.error('Stats error:', error)
     return NextResponse.json({ error: 'Failed to fetch statistics' }, { status: 500 })
