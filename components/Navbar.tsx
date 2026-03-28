@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, Search, Menu, X, BarChart2, GitCompare, Layers } from 'lucide-react'
+import { BookOpen, Search, Menu, X, BarChart2, GitCompare, Layers, ShieldCheck } from 'lucide-react'
 import { SearchBar } from './SearchBar'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -11,6 +11,7 @@ const navLinks = [
   { href: '/search', label: 'Browse', icon: Layers },
   { href: '/compare', label: 'Compare', icon: GitCompare },
   { href: '/stats', label: 'Statistics', icon: BarChart2 },
+  { href: '/admin', label: 'Admin', icon: ShieldCheck },
 ]
 
 export function Navbar() {
