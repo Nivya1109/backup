@@ -171,6 +171,9 @@ async function upsertLibrary(data: PypiPackageData, category: string) {
     developerId = dev.id
   }
 
+  // Preserve exampleCode: fetch existing value so the update block never overwrites it
+  const existing = await prisma.library.findUnique({ where: { slug }, select: { exampleCode: true } })
+
   await prisma.library.upsert({
     where: { slug },
     create: {
@@ -204,6 +207,8 @@ async function upsertLibrary(data: PypiPackageData, category: string) {
       repositoryUrl: repoUrl || undefined,
       dataSource: 'pypi-crawler',
       tags,
+      // Preserve existing exampleCode — only keep what's already in DB
+      ...(existing?.exampleCode ? { exampleCode: existing.exampleCode } : {}),
     },
   })
 }

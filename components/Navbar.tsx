@@ -4,14 +4,9 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { BookOpen, Search, Menu, X, BarChart2, GitCompare, Layers } from 'lucide-react'
 import { SearchBar } from './SearchBar'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
-import dynamic from 'next/dynamic'
-
-const NavbarAdminSection = dynamic(
-  () => import('./NavbarAdminSection').then((m) => m.NavbarAdminSection),
-  { ssr: false }
-)
+import { useSession, signOut } from 'next-auth/react'
 
 const navLinks = [
   { href: '/search', label: 'Browse', icon: Layers },
@@ -22,7 +17,11 @@ const navLinks = [
 export function Navbar() {
   const [showSearch, setShowSearch] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const pathname = usePathname()
+  const { data: session } = useSession()
+
+  useEffect(() => { setMounted(true) }, [])
 
   return (
     <nav className="border-b bg-background/95 backdrop-blur-sm sticky top-0 z-40 shadow-sm">
@@ -61,8 +60,24 @@ export function Navbar() {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* Admin access — subtle, right-aligned, client-only */}
-            <NavbarAdminSection />
+            {/* Admin access — only rendered after client hydration */}
+            {mounted && (session ? (
+              <div className="hidden md:flex items-center gap-1">
+                <Link href="/admin" className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded transition-colors">
+                  Admin
+                </Link>
+                <button
+                  onClick={() => signOut({ callbackUrl: '/' })}
+                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <Link href="/admin/login" className="hidden md:block text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded transition-colors">
+                Admin Login
+              </Link>
+            ))}
             <button
               onClick={() => {
                 if (pathname === '/search') {

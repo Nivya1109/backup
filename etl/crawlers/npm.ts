@@ -171,6 +171,9 @@ async function upsertLibrary(pkgData: NpmPackageData, category: string) {
     developerId = dev.id
   }
 
+  // Preserve exampleCode: fetch existing value so the update block never overwrites it
+  const existing = await prisma.library.findUnique({ where: { slug }, select: { exampleCode: true } })
+
   // Upsert library
   await prisma.library.upsert({
     where: { slug },
@@ -204,6 +207,8 @@ async function upsertLibrary(pkgData: NpmPackageData, category: string) {
       repositoryUrl: repoUrl || undefined,
       dataSource: 'npm-crawler',
       tags,
+      // Preserve existing exampleCode — only keep what's already in DB
+      ...(existing?.exampleCode ? { exampleCode: existing.exampleCode } : {}),
     },
   })
 }

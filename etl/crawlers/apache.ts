@@ -127,6 +127,9 @@ async function crawlApache() {
         )
       )
 
+      // Preserve exampleCode: fetch existing value so the update block never overwrites it
+      const existing = await prisma.library.findUnique({ where: { slug }, select: { exampleCode: true } })
+
       await prisma.library.upsert({
         where: { slug },
         create: {
@@ -159,6 +162,8 @@ async function crawlApache() {
           description: description || undefined,
           officialUrl: homepage,
           dataSource: 'apache-crawler',
+          // Preserve existing exampleCode — only keep what's already in DB
+          ...(existing?.exampleCode ? { exampleCode: existing.exampleCode } : {}),
         },
       })
 
