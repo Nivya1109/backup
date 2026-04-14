@@ -57,8 +57,9 @@ export default function AdminPage() {
         ])
         const statsData = await statsRes.json()
         const qualityData = await qualityRes.json()
-        setStats(statsData)
-        setQuality(qualityData)
+        // Guard: API returns { error: "..." } on failure — only set if shape is valid
+        if (statsData && !statsData.error) setStats(statsData)
+        if (qualityData && qualityData.missingExample) setQuality(qualityData)
       } catch (err) {
         console.error('Admin load error:', err)
       } finally {

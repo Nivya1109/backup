@@ -53,8 +53,9 @@ export default function StatsPage() {
       fetch('/api/categories').then((r) => r.json()),
     ])
       .then(([statsData, catsData]) => {
-        setStats(statsData)
-        setCategories(catsData)
+        // Guard: API returns an error object on failure — only set if the shape is valid
+        if (statsData && typeof statsData.licenseBreakdown !== 'undefined') setStats(statsData)
+        if (Array.isArray(catsData)) setCategories(catsData)
       })
       .catch((e) => console.error('Failed to fetch stats:', e))
       .finally(() => setLoading(false))

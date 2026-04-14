@@ -8,120 +8,136 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const category = searchParams.get('category') || ''
 
-    const categoryFilter = category
-      ? {
+    // When a category filter is active, pre-fetch the matching library IDs so
+    // every subsequent query can use them as an `id: { in: [...] }` filter.
+    // This avoids complex raw SQL joins and BigInt serialization issues.
+    let libraryIds: string[] | undefined
+    if (category) {
+      const libs = await prisma.library.findMany({
+        where: {
           categories: {
             some: {
-              category: { name: { equals: category, mode: 'insensitive' as const } },
+              category: { name: { equals: category, mode: 'insensitive' } },
             },
           },
-        }
-      : {}
+        },
+        select: { id: true },
+      })
+      libraryIds = libs.map((l) => l.id)
+      // Short-circuit: category exists but has no libraries
+      if (libraryIds.length === 0) {
+        return NextResponse.json({
+          totalLibraries: 0,
+          librariesPerCategory: [],
+          librariesPerLanguage: [],
+          platformDistribution: [],
+          librariesByOrg: [],
+          licenseBreakdown: { free: 0, paid: 0 },
+        })
+      }
+    }
 
-    // Total libraries
-    const totalLibraries = await prisma.library.count({ where: categoryFilter })
+    const libWhere = libraryIds ? { id: { in: libraryIds } } : {}
 
-    // Libraries per category
-    const librariesPerCategory = category
-      ? await prisma.$queryRaw<Array<{ category: string; count: bigint }>>`
-          SELECT c.name as category, COUNT(lc."libraryId")::bigint as count
-          FROM "Library_Category" lc
-          JOIN "Category" c ON c.id = lc."categoryId"
-          WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY c.name
-          ORDER BY count DESC
-        `
-      : await prisma.$queryRaw<Array<{ category: string; count: bigint }>>`
-          SELECT c.name as category, COUNT(lc."libraryId")::bigint as count
-          FROM "Library_Category" lc
-          JOIN "Category" c ON c.id = lc."categoryId"
-          GROUP BY c.name
-          ORDER BY count DESC
-        `
+    // --- Total libraries ---
+    const totalLibraries = await prisma.library.count({ where: libWhere })
 
-    // Libraries per language
-    const librariesPerLanguage = category
-      ? await prisma.$queryRaw<Array<{ language: string; count: bigint }>>`
-          SELECT l.name as language, COUNT(ll."libraryId")::bigint as count
-          FROM "Library_Language" ll
-          JOIN "Language" l ON l.id = ll."languageId"
-          JOIN "Library_Category" lc ON lc."libraryId" = ll."libraryId"
-          JOIN "Category" c ON c.id = lc."categoryId"
-          WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY l.name
-          ORDER BY count DESC
-        `
-      : await prisma.$queryRaw<Array<{ language: string; count: bigint }>>`
-          SELECT l.name as language, COUNT(ll."libraryId")::bigint as count
-          FROM "Library_Language" ll
-          JOIN "Language" l ON l.id = ll."languageId"
-          GROUP BY l.name
-          ORDER BY count DESC
-        `
-
-    // Platform distribution
-    const platformDistribution = category
-      ? await prisma.$queryRaw<Array<{ category: string; platform: string; count: bigint }>>`
-          SELECT c.name as category, p.name as platform, COUNT(*)::bigint as count
-          FROM "Library_Category" lc
-          JOIN "Library" lib ON lib.id = lc."libraryId"
-          JOIN "Library_Platform" lp ON lp."libraryId" = lib.id
-          JOIN "Platform" p ON p.id = lp."platformId"
-          JOIN "Category" c ON c.id = lc."categoryId"
-          WHERE c.name ILIKE ${`%${category}%`}
-          GROUP BY c.name, p.name
-          ORDER BY c.name, count DESC
-        `
-      : await prisma.$queryRaw<Array<{ category: string; platform: string; count: bigint }>>`
-          SELECT c.name as category, p.name as platform, COUNT(*)::bigint as count
-          FROM "Library_Category" lc
-          JOIN "Library" lib ON lib.id = lc."libraryId"
-          JOIN "Library_Platform" lp ON lp."libraryId" = lib.id
-          JOIN "Platform" p ON p.id = lp."platformId"
-          JOIN "Category" c ON c.id = lc."categoryId"
-          GROUP BY c.name, p.name
-          ORDER BY c.name, count DESC
-        `
-
-    // Libraries by organization
-    const librariesByOrg = await prisma.$queryRaw<Array<{ org: string; count: bigint }>>`
-      SELECT o.name as org, COUNT(lib.id)::bigint as count
-      FROM "Organization" o
-      JOIN "Library" lib ON lib."organizationId" = o.id
-      GROUP BY o.name
-      ORDER BY count DESC
-      LIMIT 10
-    `
-
-    // Free vs paid counts
-    const freeCount = await prisma.library.count({ where: { ...categoryFilter, costMinUSD: 0 } })
-    const paidCount = await prisma.library.count({
-      where: { ...categoryFilter, costMinUSD: { gt: 0 } },
+    // --- Libraries per category ---
+    // Fetch each category with the filtered subset of libraries and count in JS
+    // (avoids raw SQL and BigInt)
+    const categoryRows = await prisma.category.findMany({
+      where: libraryIds
+        ? { libraries: { some: { libraryId: { in: libraryIds } } } }
+        : { libraries: { some: {} } },
+      select: {
+        name: true,
+        libraries: {
+          where: libraryIds ? { libraryId: { in: libraryIds } } : {},
+          select: { libraryId: true },
+        },
+      },
     })
+    const librariesPerCategory = categoryRows
+      .map((c) => ({ category: c.name, count: c.libraries.length }))
+      .filter((c) => c.count > 0)
+      .sort((a, b) => b.count - a.count)
+
+    // --- Libraries per language ---
+    const languageRows = await prisma.language.findMany({
+      where: libraryIds
+        ? { libraries: { some: { libraryId: { in: libraryIds } } } }
+        : { libraries: { some: {} } },
+      select: {
+        name: true,
+        libraries: {
+          where: libraryIds ? { libraryId: { in: libraryIds } } : {},
+          select: { libraryId: true },
+        },
+      },
+    })
+    const librariesPerLanguage = languageRows
+      .map((l) => ({ language: l.name, count: l.libraries.length }))
+      .filter((l) => l.count > 0)
+      .sort((a, b) => b.count - a.count)
+
+    // --- Platform distribution (category × platform) ---
+    // Fetch filtered libraries with their category and platform names, then
+    // aggregate the (category, platform) pairs in JavaScript.
+    const libsForPlatform = await prisma.library.findMany({
+      where: libWhere,
+      select: {
+        categories: { select: { category: { select: { name: true } } } },
+        platforms:  { select: { platform:  { select: { name: true } } } },
+      },
+    })
+    const platformMap = new Map<string, number>()
+    for (const lib of libsForPlatform) {
+      for (const lc of lib.categories) {
+        for (const lp of lib.platforms) {
+          const key = `${lc.category.name}|||${lp.platform.name}`
+          platformMap.set(key, (platformMap.get(key) ?? 0) + 1)
+        }
+      }
+    }
+    const platformDistribution = Array.from(platformMap.entries())
+      .map(([key, count]) => {
+        const [cat, platform] = key.split('|||')
+        return { category: cat, platform, count }
+      })
+      .sort((a, b) => a.category.localeCompare(b.category) || b.count - a.count)
+
+    // --- Top organizations (up to 10) ---
+    const orgRows = await prisma.organization.findMany({
+      where: libraryIds
+        ? { libraries: { some: { id: { in: libraryIds } } } }
+        : { libraries: { some: {} } },
+      select: {
+        name: true,
+        libraries: {
+          where: libraryIds ? { id: { in: libraryIds } } : {},
+          select: { id: true },
+        },
+      },
+    })
+    const librariesByOrg = orgRows
+      .map((o) => ({ org: o.name, count: o.libraries.length }))
+      .filter((o) => o.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+
+    // --- License breakdown ---
+    const [freeCount, paidCount] = await Promise.all([
+      prisma.library.count({ where: { ...libWhere, costMinUSD: 0 } }),
+      prisma.library.count({ where: { ...libWhere, costMinUSD: { gt: 0 } } }),
+    ])
 
     return NextResponse.json({
       totalLibraries,
-      librariesPerCategory: librariesPerCategory.map((r) => ({
-        category: r.category,
-        count: Number(r.count),
-      })),
-      librariesPerLanguage: librariesPerLanguage.map((r) => ({
-        language: r.language,
-        count: Number(r.count),
-      })),
-      platformDistribution: platformDistribution.map((r) => ({
-        category: r.category,
-        platform: r.platform,
-        count: Number(r.count),
-      })),
-      librariesByOrg: librariesByOrg.map((r) => ({
-        org: r.org,
-        count: Number(r.count),
-      })),
-      licenseBreakdown: {
-        free: freeCount,
-        paid: paidCount,
-      },
+      librariesPerCategory,
+      librariesPerLanguage,
+      platformDistribution,
+      librariesByOrg,
+      licenseBreakdown: { free: freeCount, paid: paidCount },
     })
   } catch (error) {
     console.error('Stats error:', error)

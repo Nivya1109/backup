@@ -69,9 +69,10 @@ export default function SearchPage() {
       fetch('/api/languages').then((r) => r.json()),
     ])
       .then(([cats, plats, langs]) => {
-        setCategories(cats)
-        setPlatforms(plats)
-        setLanguages(langs)
+        // Guard: API returns an error object on failure — only set if it's an array
+        if (Array.isArray(cats))   setCategories(cats)
+        if (Array.isArray(plats))  setPlatforms(plats)
+        if (Array.isArray(langs))  setLanguages(langs)
       })
       .catch((e) => console.error('Failed to fetch filters:', e))
   }, [])

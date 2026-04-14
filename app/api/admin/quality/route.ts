@@ -80,13 +80,12 @@ export async function GET() {
         take: 10,
       }),
 
-      // Source breakdown
-      prisma.$queryRaw<Array<{ source: string; count: bigint }>>`
-        SELECT COALESCE("dataSource", 'unknown') as source, COUNT(*)::bigint as count
-        FROM "Library"
-        GROUP BY COALESCE("dataSource", 'unknown')
-        ORDER BY count DESC
-      `,
+      // Source breakdown — use groupBy to avoid BigInt serialization issues
+      prisma.library.groupBy({
+        by: ['dataSource'],
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } },
+      }),
     ])
 
     return NextResponse.json({
@@ -122,8 +121,8 @@ export async function GET() {
         category: lib.categories[0]?.category.name ?? null,
       })),
       sourceBreakdown: sourceBreakdownRaw.map((r) => ({
-        source: r.source,
-        count: Number(r.count),
+        source: r.dataSource ?? 'unknown',
+        count: r._count.id,
       })),
     })
   } catch (error) {

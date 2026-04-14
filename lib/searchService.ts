@@ -17,6 +17,7 @@
 
 import { searchClient, SIP_COLLECTION } from './search'
 import { prisma } from './prisma'
+import { expandQuery } from './search/expandQuery'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,8 +103,8 @@ const SYNONYMS: Record<string, string[]> = {
   migration:    ['database', 'schema', 'alembic', 'flyway'],
 
   // Testing
-  test:         ['testing', 'unit test', 'jest', 'mocha', 'pytest', 'spec'],
-  testing:      ['test', 'unit test', 'e2e', 'integration', 'assertion'],
+  test:         ['testing', 'unit test', 'jest', 'vitest', 'mocha', 'pytest', 'spec', 'cypress', 'playwright'],
+  testing:      ['test', 'unit test', 'e2e', 'integration', 'assertion', 'jest', 'vitest', 'cypress', 'playwright'],
   mock:         ['testing', 'stub', 'fake', 'spy', 'sinon'],
   e2e:          ['testing', 'end to end', 'playwright', 'cypress', 'browser'],
   unit:         ['testing', 'unit test', 'assertion', 'expect'],
@@ -172,6 +173,19 @@ const SYNONYMS: Record<string, string[]> = {
   rust:       ['cargo', 'systems programming'],
   ruby:       ['rails', 'gem'],
 
+  // State management (was entirely missing — added for use-case search)
+  state:              ['state management', 'redux', 'zustand', 'recoil', 'mobx', 'jotai', 'store', 'global state'],
+  'state management': ['redux', 'zustand', 'recoil', 'mobx', 'jotai', 'state', 'store', 'flux', 'atom'],
+  redux:              ['state management', 'state', 'store', 'flux', 'react'],
+  zustand:            ['state management', 'state', 'store', 'react'],
+  mobx:               ['state management', 'state', 'store', 'observable', 'react'],
+
+  // Use-case bigrams — phrase queries now map to specific library names
+  'http client':      ['axios', 'fetch', 'got', 'ky', 'request', 'rest', 'node-fetch'],
+  'api client':       ['axios', 'fetch', 'rest', 'request', 'sdk', 'http client'],
+  'database orm':     ['prisma', 'sequelize', 'typeorm', 'drizzle', 'orm', 'database'],
+  'form validation':  ['zod', 'yup', 'joi', 'formik', 'react hook form', 'validation', 'schema'],
+
   // Common intent phrases
   email:        ['smtp', 'nodemailer', 'mail', 'sendgrid', 'mailgun'],
   smtp:         ['email', 'mail', 'nodemailer'],
@@ -191,6 +205,77 @@ const SYNONYMS: Record<string, string[]> = {
   time:         ['date', 'datetime', 'moment', 'dayjs', 'duration'],
   utility:      ['helper', 'lodash', 'underscore', 'ramda', 'tools'],
   connect:      ['database', 'postgres', 'mysql', 'connection', 'driver'],
+}
+
+// ---------------------------------------------------------------------------
+// Intent detection — maps query phrases to expected result categories.
+// Used for post-search re-ranking so intent-matching libraries always surface
+// above libraries that merely share a keyword with the non-intent part of the query.
+// ---------------------------------------------------------------------------
+
+const INTENT_TO_CATEGORIES: Record<string, string[]> = {
+  testing:            ['testing', 'test runner', 'end-to-end', 'unit test', 'e2e', 'assertion', 'coverage'],
+  authentication:     ['authentication', 'auth', 'security', 'identity', 'oauth', 'jwt', 'session'],
+  'http client':      ['http', 'networking', 'api client', 'request', 'rest client', 'http client'],
+  logging:            ['logging', 'log', 'monitoring', 'logger'],
+  database:           ['database', 'orm', 'query builder', 'sql'],
+  'state management': ['state management', 'state', 'store'],
+}
+
+/** Returns the dominant intent for a query, or null if none detected. */
+function detectIntent(query: string): string | null {
+  const q = query.toLowerCase()
+  // Check multi-word intents first (longer phrase = more specific)
+  if (q.includes('state management') || q.includes('global state') || q.includes('app state')) return 'state management'
+  if (q.includes('http client') || q.includes('rest client') || q.includes('api client')) return 'http client'
+  if (
+    q.includes('react testing') || q.includes('testing react') ||
+    q.includes('test react')    || q.includes('react test')    ||
+    q.includes('test app')      || q.includes('test component')
+  ) return 'testing'
+  if (
+    q.includes('login system') || q.includes('login page') ||
+    q.includes('user auth')    || q.includes('sign in')    ||
+    q.includes('login')        || q.includes('oauth')
+  ) return 'authentication'
+  // Single-word intents
+  if (q === 'testing' || q.startsWith('test ') || q.endsWith(' test') || q.includes('testing')) return 'testing'
+  if (q.includes(' auth') || q.startsWith('auth') || q.includes('jwt') || q.includes('session')) return 'authentication'
+  if (q.includes('logging') || q.includes('logger')) return 'logging'
+  if (q === 'orm' || q.includes(' orm') || q.startsWith('orm ') || q.includes('database')) return 'database'
+  return null
+}
+
+/**
+ * Bonus score for a result that matches the detected intent.
+ * 100 = category directly names the intent (strongest signal)
+ *  40 = name/summary/functionDesc contains an intent keyword
+ *   0 = no match
+ */
+function intentBonus(result: SearchResult, intent: string): number {
+  const targetCats = INTENT_TO_CATEGORIES[intent]
+  if (!targetCats || targetCats.length === 0) return 0
+  const cats    = result.categories.map((c) => c.toLowerCase())
+  const name    = result.name.toLowerCase()
+  const summary = (result.shortSummary  ?? '').toLowerCase()
+  const func    = (result.functionDesc  ?? '').toLowerCase()
+  if (targetCats.some((tc) => cats.some((c) => c.includes(tc))))             return 100
+  if (targetCats.some((tc) => name.includes(tc) || summary.includes(tc) || func.includes(tc))) return 40
+  return 0
+}
+
+/**
+ * Re-orders results so intent-matching libraries appear before libraries that
+ * only matched the non-intent part of the query (e.g. "react" in "react testing").
+ * Uses a stable sort so Typesense/Postgres order is preserved within each bucket.
+ */
+function reRankByIntent(results: SearchResult[], query: string): SearchResult[] {
+  const intent = detectIntent(query)
+  if (!intent) return results
+  return [...results]
+    .map((r, idx) => ({ r, idx, bonus: intentBonus(r, intent) }))
+    .sort((a, b) => b.bonus - a.bonus || a.idx - b.idx)
+    .map((x) => x.r)
 }
 
 // ---------------------------------------------------------------------------
@@ -278,10 +363,37 @@ async function searchWithTypesense(params: SearchParams): Promise<SearchResponse
   } = params
 
   const processed = preprocessQuery(query)
-  // Use the synonym-expanded query for Typesense — its BM25 engine will
-  // match any of the expanded terms across all indexed fields.
-  const tsQuery = processed.expanded || '*'
-  const isWildcard = !processed.expanded
+
+  // Use-case phrase expansion: detect multi-word intent patterns ("test react",
+  // "http client", etc.) and add matching library names / keywords.
+  // expandQuery returns [] when no phrase matches → falls back to original query.
+  // This runs ON TOP of the existing per-word SYNONYMS expansion in preprocessQuery.
+  const useCaseTerms = expandQuery(query)
+
+  // KEY FIX: when use-case phrases are detected, use the RAW original query
+  // as the base — NOT the SYNONYMS-expanded version.
+  //
+  // Why: SYNONYMS expansion of "react testing" adds generic terms like
+  // "ui", "frontend", "javascript", "component" which match Apache libraries
+  // and other unrelated results. The specific library names from useCaseMap
+  // (e.g. "react testing library", "jest", "vitest") are already precise
+  // enough to find the right results without that noise.
+  //
+  // When NO use-case match: fall back to SYNONYMS expansion as before
+  // (unchanged behaviour for all existing searches).
+  const baseForTypesense = useCaseTerms.length > 0
+    ? query.trim()
+    : (processed.expanded || query.trim())
+
+  const tsQuery = baseForTypesense
+    ? [baseForTypesense, ...useCaseTerms].join(' ').trim()
+    : '*'
+  const isWildcard = !tsQuery || tsQuery === '*'
+
+  // Debug logs — shows what query is actually sent to Typesense
+  console.log('[Search] Original Query  :', query)
+  console.log('[Search] Use-case terms  :', useCaseTerms)
+  console.log('[Search] Final TS query  :', tsQuery)
 
   const filters: string[] = []
   if (category)    filters.push(`categories:=[${category}]`)
@@ -327,7 +439,7 @@ async function searchWithTypesense(params: SearchParams): Promise<SearchResponse
     .documents()
     .search(tsParams)
 
-  const results: SearchResult[] = ((searchResults.hits as TypesenseHit[]) || []).map((hit) => ({
+  const rawResults: SearchResult[] = ((searchResults.hits as TypesenseHit[]) || []).map((hit) => ({
     id: hit.document.id,
     name: hit.document.name,
     slug: hit.document.slug,
@@ -342,6 +454,10 @@ async function searchWithTypesense(params: SearchParams): Promise<SearchResponse
     platforms: hit.document.platforms || [],
     languages: hit.document.languages || [],
   }))
+
+  // Re-rank so intent-matching libraries (e.g. testing libs for "react testing")
+  // surface above libraries that only matched the non-intent word (e.g. "React").
+  const results = reRankByIntent(rawResults, query)
 
   return {
     results,
@@ -496,6 +612,8 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
   } = params
 
   const processed = preprocessQuery(query)
+  const useCaseTerms = expandQuery(query)
+  const pgIntent = detectIntent(query)
 
   // Build facet filter using Prisma (applied as an in-memory filter on matched IDs)
   const licenseClause =
@@ -544,14 +662,40 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
 
   if (ftTotal > 0) {
     const libraries = await fetchLibrariesByIds(ftIds)
-    // Re-sort for correct relevance (FTS rank already baked into order from ftSearch)
-    const sorted = libraries.sort((a, b) => {
-      const sa = relevanceScore(a, processed.normalized, processed.tokens)
-      const sb = relevanceScore(b, processed.normalized, processed.tokens)
-      if (sa !== sb) return sb - sa
-      return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-    })
-    return { results: sorted.map(toResult), pagination: { page, pageSize, total: ftTotal, totalPages: Math.ceil(ftTotal / pageSize) } }
+    const sorted = libraries
+      .map((lib) => ({ result: toResult(lib), lib }))
+      .sort((a, b) => {
+        const sa = relevanceScore(a.lib, processed.normalized, processed.tokens)
+                 + (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+        const sb = relevanceScore(b.lib, processed.normalized, processed.tokens)
+                 + (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+        if (sa !== sb) return sb - sa
+        return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
+      })
+      .map((x) => x.result)
+    return { results: sorted, pagination: { page, pageSize, total: ftTotal, totalPages: Math.ceil(ftTotal / pageSize) } }
+  }
+
+  // Pass 1b: Use-case FTS — when original FTS finds nothing but intent terms are known.
+  // Example: "login system" has no direct FTS match but maps to "passport next-auth jwt …"
+  if (useCaseTerms.length > 0) {
+    const ucQuery = useCaseTerms.join(' ')
+    const { ids: ucIds, total: ucTotal } = await ftSearch(ucQuery, facetIds, page, pageSize)
+    if (ucTotal > 0) {
+      const libraries = await fetchLibrariesByIds(ucIds)
+      const sorted = libraries
+        .map((lib) => ({ result: toResult(lib), lib }))
+        .sort((a, b) => {
+          const sa = (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+                   + relevanceScore(a.lib, processed.normalized, processed.tokens)
+          const sb = (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+                   + relevanceScore(b.lib, processed.normalized, processed.tokens)
+          if (sa !== sb) return sb - sa
+          return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
+        })
+        .map((x) => x.result)
+      return { results: sorted, pagination: { page, pageSize, total: ucTotal, totalPages: Math.ceil(ucTotal / pageSize) } }
+    }
   }
 
   // Pass 2: FTS on synonym-expanded query (catches "auth" → "authentication oauth jwt …")
@@ -579,13 +723,18 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
       skip: (page - 1) * pageSize, take: pageSize, orderBy: { name: 'asc' },
     }),
   ])
-  const sorted = [...likeLibs].sort((a, b) => {
-    const sa = relevanceScore(a, processed.normalized, processed.tokens)
-    const sb = relevanceScore(b, processed.normalized, processed.tokens)
-    if (sa !== sb) return sb - sa
-    return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-  })
-  return { results: sorted.map(toResult), pagination: { page, pageSize, total: likeTotal, totalPages: Math.ceil(likeTotal / pageSize) } }
+  const sorted = [...likeLibs]
+    .map((lib) => ({ result: toResult(lib), lib }))
+    .sort((a, b) => {
+      const sa = relevanceScore(a.lib, processed.normalized, processed.tokens)
+               + (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+      const sb = relevanceScore(b.lib, processed.normalized, processed.tokens)
+               + (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+      if (sa !== sb) return sb - sa
+      return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
+    })
+    .map((x) => x.result)
+  return { results: sorted, pagination: { page, pageSize, total: likeTotal, totalPages: Math.ceil(likeTotal / pageSize) } }
 }
 
 function toResult(lib: LibraryWithRelations): SearchResult {
@@ -652,7 +801,14 @@ async function trigramSearch(normalized: string, limit: number): Promise<Set<str
 
 export async function searchLibraries(params: SearchParams): Promise<SearchResponse> {
   try {
-    return await searchWithTypesense(params)
+    const tsResult = await searchWithTypesense(params)
+    // If Typesense returned results, use them. If it returned 0, fall through to
+    // Postgres — this handles the common case where Typesense is running but the
+    // index hasn't been populated yet (e.g. first run before sync/seed).
+    if (tsResult.results.length > 0 || tsResult.pagination.total > 0) {
+      return tsResult
+    }
+    console.warn('Typesense returned 0 results, falling back to Postgres')
   } catch (error) {
     console.warn('Typesense unavailable, falling back to Postgres:', (error as Error).message)
   }

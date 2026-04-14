@@ -41,3 +41,6 @@ prisma/migrations/**/migration.sql
 
 # ETL logs
 logs/
+metrics-report/
+dependency-tree.txt
+Analysis/
