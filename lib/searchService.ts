@@ -222,6 +222,29 @@ const INTENT_TO_CATEGORIES: Record<string, string[]> = {
   'state management': ['state management', 'state', 'store'],
 }
 
+/**
+ * Known JavaScript/TypeScript ecosystem libraries per intent.
+ * These get a higher bonus (+200) than a generic category match (+100), which
+ * is what was causing Apache AntUnit to rank above Jest — both were getting
+ * the same +100 for having "testing" in their category.
+ */
+const INTENT_TOP_LIBRARIES: Record<string, string[]> = {
+  testing:            ['jest', 'vitest', 'cypress', 'playwright', 'mocha', 'jasmine', 'react testing library', 'supertest', 'enzyme', 'ava', 'tap'],
+  authentication:     ['next-auth', 'passport', 'auth0', 'jsonwebtoken', 'express-jwt', 'lucia', 'clerk', 'supertokens', 'keycloak'],
+  'http client':      ['axios', 'got', 'ky', 'node-fetch', 'superagent', 'undici', 'wretch', 'redaxios'],
+  logging:            ['winston', 'pino', 'morgan', 'bunyan', 'loglevel', 'log4js', 'signale'],
+  database:           ['prisma', 'typeorm', 'sequelize', 'drizzle', 'mongoose', 'pg', 'mysql2', 'knex', 'kysely', 'slonik'],
+  'state management': ['redux', 'zustand', 'recoil', 'jotai', 'mobx', 'valtio', 'xstate', 'effector'],
+}
+
+/** True when the query implies a JavaScript/Node.js context. */
+function isJsContextQuery(query: string): boolean {
+  const q = query.toLowerCase()
+  return q.includes('react') || q.includes('node') || q.includes('javascript') ||
+         q.includes('typescript') || q.includes('npm') || q.includes('next') ||
+         q.includes('vue') || q.includes('angular') || q.includes('svelte')
+}
+
 /** Returns the dominant intent for a query, or null if none detected. */
 function detectIntent(query: string): string | null {
   const q = query.toLowerCase()
@@ -247,21 +270,58 @@ function detectIntent(query: string): string | null {
 }
 
 /**
- * Bonus score for a result that matches the detected intent.
- * 100 = category directly names the intent (strongest signal)
- *  40 = name/summary/functionDesc contains an intent keyword
- *   0 = no match
+ * Tiered bonus score for a result against the detected intent.
+ *
+ * Tier 1 (+200): library name is in the known JS/TS ecosystem list for this intent.
+ *   → Ensures Jest/Cypress rank above Apache AntUnit even though both have
+ *     "testing" in their category (the old flat +100 made them tie).
+ *
+ * Tier 2 (+100): library's categories contain an intent keyword.
+ *   → Generic "testing" libs that aren't in the top list (e.g. Java libs).
+ *
+ * Tier 3 (+40): name/summary/functionDesc contains an intent keyword, no category match.
+ *   → Loose relevance signal; kept low so it can't beat a real category match.
+ *
+ * JS ecosystem bonus (+30): when query implies JavaScript context (contains "react",
+ *   "node", etc.) and the library's languages include JS/TS.
+ *   → Breaks ties between equally-scored JS and non-JS libraries.
  */
-function intentBonus(result: SearchResult, intent: string): number {
-  const targetCats = INTENT_TO_CATEGORIES[intent]
-  if (!targetCats || targetCats.length === 0) return 0
-  const cats    = result.categories.map((c) => c.toLowerCase())
+function intentBonus(result: SearchResult, intent: string, query = ''): number {
+  const targetCats = INTENT_TO_CATEGORIES[intent] ?? []
+  const topLibs    = INTENT_TOP_LIBRARIES[intent]  ?? []
+
   const name    = result.name.toLowerCase()
-  const summary = (result.shortSummary  ?? '').toLowerCase()
-  const func    = (result.functionDesc  ?? '').toLowerCase()
-  if (targetCats.some((tc) => cats.some((c) => c.includes(tc))))             return 100
-  if (targetCats.some((tc) => name.includes(tc) || summary.includes(tc) || func.includes(tc))) return 40
-  return 0
+  const cats    = result.categories.map((c) => c.toLowerCase())
+  const langs   = result.languages.map((l) => l.toLowerCase())
+  const summary = (result.shortSummary ?? '').toLowerCase()
+  const func    = (result.functionDesc ?? '').toLowerCase()
+
+  let bonus = 0
+
+  // Tier 1 — known top library for this intent
+  if (topLibs.some((lib) => name === lib || (lib.length >= 4 && name.includes(lib)))) {
+    bonus += 200
+  }
+
+  // Tier 2 — category signals the intent
+  if (targetCats.some((tc) => cats.some((c) => c.includes(tc)))) {
+    bonus += 100
+  }
+
+  // Tier 3 — only if no category match at all (avoids double-counting)
+  if (bonus === 0 && targetCats.some((tc) => name.includes(tc) || summary.includes(tc) || func.includes(tc))) {
+    bonus += 40
+  }
+
+  // JS ecosystem bonus — breaks ties when query implies JavaScript context
+  if (
+    isJsContextQuery(query) &&
+    langs.some((l) => l.includes('javascript') || l.includes('typescript'))
+  ) {
+    bonus += 30
+  }
+
+  return bonus
 }
 
 /**
@@ -273,7 +333,7 @@ function reRankByIntent(results: SearchResult[], query: string): SearchResult[] 
   const intent = detectIntent(query)
   if (!intent) return results
   return [...results]
-    .map((r, idx) => ({ r, idx, bonus: intentBonus(r, intent) }))
+    .map((r, idx) => ({ r, idx, bonus: intentBonus(r, intent, query) }))
     .sort((a, b) => b.bonus - a.bonus || a.idx - b.idx)
     .map((x) => x.r)
 }
@@ -475,7 +535,7 @@ async function searchWithTypesense(params: SearchParams): Promise<SearchResponse
   if (intentDetected) {
     console.log('[Search] Top results after re-rank:')
     reRanked.slice(0, 5).forEach((r, i) => {
-      console.log(`  ${i + 1}. ${r.name} | cats: [${r.categories.join(', ')}] | bonus: ${intentBonus(r, intentDetected)}`)
+      console.log(`  ${i + 1}. ${r.name} | cats: [${r.categories.join(', ')}] | langs: [${r.languages.join(', ')}] | bonus: ${intentBonus(r, intentDetected, query)}`)
     })
   }
 
@@ -691,9 +751,9 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
       .map((lib) => ({ result: toResult(lib), lib }))
       .sort((a, b) => {
         const sa = relevanceScore(a.lib, processed.normalized, processed.tokens)
-                 + (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+                 + (pgIntent ? intentBonus(a.result, pgIntent, query) : 0)
         const sb = relevanceScore(b.lib, processed.normalized, processed.tokens)
-                 + (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+                 + (pgIntent ? intentBonus(b.result, pgIntent, query) : 0)
         if (sa !== sb) return sb - sa
         return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
       })
@@ -711,9 +771,9 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
       const sorted = libraries
         .map((lib) => ({ result: toResult(lib), lib }))
         .sort((a, b) => {
-          const sa = (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+          const sa = (pgIntent ? intentBonus(a.result, pgIntent, query) : 0)
                    + relevanceScore(a.lib, processed.normalized, processed.tokens)
-          const sb = (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+          const sb = (pgIntent ? intentBonus(b.result, pgIntent, query) : 0)
                    + relevanceScore(b.lib, processed.normalized, processed.tokens)
           if (sa !== sb) return sb - sa
           return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
@@ -752,9 +812,9 @@ async function searchWithPostgres(params: SearchParams): Promise<SearchResponse>
     .map((lib) => ({ result: toResult(lib), lib }))
     .sort((a, b) => {
       const sa = relevanceScore(a.lib, processed.normalized, processed.tokens)
-               + (pgIntent ? intentBonus(a.result, pgIntent) : 0)
+               + (pgIntent ? intentBonus(a.result, pgIntent, query) : 0)
       const sb = relevanceScore(b.lib, processed.normalized, processed.tokens)
-               + (pgIntent ? intentBonus(b.result, pgIntent) : 0)
+               + (pgIntent ? intentBonus(b.result, pgIntent, query) : 0)
       if (sa !== sb) return sb - sa
       return a.lib.name.toLowerCase().localeCompare(b.lib.name.toLowerCase())
     })
