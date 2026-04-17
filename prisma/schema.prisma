@@ -234,3 +234,22 @@ model VerificationToken {
 
   @@unique([identifier, token])
 }
+
+// ---------------------------------------------------------------------------
+// Support / Help Desk
+// ---------------------------------------------------------------------------
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  category  String   // Bug Report | Search Issue | Missing Library | Feature Request | General Question
+  message   String   @db.Text
+  status    String   @default("open") // open | in_progress | resolved
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}

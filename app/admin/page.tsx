@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   BookOpen, Code2, Globe, LogOut,
-  AlertCircle, Link2, Database, ExternalLink,
+  AlertCircle, Link2, Database, ExternalLink, MessageSquare,
 } from 'lucide-react'
 
 interface AdminStats {
@@ -16,6 +16,17 @@ interface AdminStats {
   librariesPerLanguage: Array<{ language: string; count: number }>
   librariesByOrg: Array<{ org: string; count: number }>
   licenseBreakdown: { free: number; paid: number }
+}
+
+interface SupportTicket {
+  id: string
+  name: string
+  email: string
+  subject: string
+  category: string
+  message: string
+  status: string
+  createdAt: string
 }
 
 interface QualityData {
@@ -35,11 +46,90 @@ interface QualityData {
   sourceBreakdown: Array<{ source: string; count: number }>
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  open:        'Open',
+  in_progress: 'In Progress',
+  resolved:    'Resolved',
+}
+const STATUS_COLORS: Record<string, string> = {
+  open:        'bg-blue-100 text-blue-700 border-blue-200',
+  in_progress: 'bg-amber-100 text-amber-700 border-amber-200',
+  resolved:    'bg-emerald-100 text-emerald-700 border-emerald-200',
+}
+
+function TicketRow({
+  ticket,
+  onStatusChange,
+}: {
+  ticket: SupportTicket
+  onStatusChange: (id: string, status: string) => void
+}) {
+  const [expanded, setExpanded]   = useState(false)
+  const [updating, setUpdating]   = useState(false)
+
+  async function cycleStatus() {
+    const next = ticket.status === 'open' ? 'in_progress'
+               : ticket.status === 'in_progress' ? 'resolved'
+               : 'open'
+    setUpdating(true)
+    try {
+      const res = await fetch(`/api/support/${ticket.id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ status: next }),
+      })
+      if (res.ok) onStatusChange(ticket.id, next)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  return (
+    <div className="py-3 first:pt-0 last:pb-0 space-y-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-sm font-medium hover:underline text-left truncate block max-w-full"
+          >
+            {ticket.subject}
+          </button>
+          <p className="text-xs text-muted-foreground">
+            {ticket.name} · {ticket.email} · {ticket.category} · {new Date(ticket.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${STATUS_COLORS[ticket.status] ?? ''}`}>
+            {STATUS_LABELS[ticket.status] ?? ticket.status}
+          </span>
+          {ticket.status !== 'resolved' && (
+            <button
+              onClick={cycleStatus}
+              disabled={updating}
+              title="Advance status"
+              className="text-xs text-muted-foreground hover:text-foreground border rounded px-2 py-0.5 transition-colors disabled:opacity-50"
+            >
+              {updating ? '…' : '→'}
+            </button>
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <p className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/40 rounded p-3 mt-1">
+          {ticket.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function AdminPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [quality, setQuality] = useState<QualityData | null>(null)
+  const [tickets, setTickets] = useState<SupportTicket[]>([])
+  const [ticketFilter, setTicketFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -51,15 +141,18 @@ export default function AdminPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [statsRes, qualityRes] = await Promise.all([
+        const [statsRes, qualityRes, ticketsRes] = await Promise.all([
           fetch('/api/stats'),
           fetch('/api/admin/quality'),
+          fetch('/api/support'),
         ])
-        const statsData = await statsRes.json()
+        const statsData   = await statsRes.json()
         const qualityData = await qualityRes.json()
+        const ticketsData = await ticketsRes.json()
         // Guard: API returns { error: "..." } on failure — only set if shape is valid
         if (statsData && !statsData.error) setStats(statsData)
         if (qualityData && qualityData.missingExample) setQuality(qualityData)
+        if (ticketsData && ticketsData.tickets) setTickets(ticketsData.tickets)
       } catch (err) {
         console.error('Admin load error:', err)
       } finally {
@@ -189,6 +282,51 @@ export default function AdminPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* User Queries (support tickets) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-primary" /> User Queries
+              </span>
+              <span className="text-sm font-normal text-muted-foreground">
+                {tickets.length} total
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {/* Status filter tabs */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {['all', 'open', 'in_progress', 'resolved'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setTicketFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    ticketFilter === f
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background text-muted-foreground border-border hover:border-primary hover:text-foreground'
+                  }`}
+                >
+                  {f === 'all' ? 'All' : f === 'in_progress' ? 'In Progress' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+            {tickets.filter((t) => ticketFilter === 'all' || t.status === ticketFilter).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No queries found.</p>
+            ) : (
+              <div className="divide-y max-h-72 overflow-y-auto">
+                {tickets
+                  .filter((t) => ticketFilter === 'all' || t.status === ticketFilter)
+                  .map((ticket) => (
+                    <TicketRow key={ticket.id} ticket={ticket} onStatusChange={(id, status) => {
+                      setTickets((prev) => prev.map((t) => t.id === id ? { ...t, status } : t))
+                    }} />
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Data Quality ── */}
@@ -289,6 +427,7 @@ export default function AdminPage() {
           </Card>
         </div>
       </div>
+
 
       {/* ── Recent Libraries ── */}
       <div>
