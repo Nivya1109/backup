@@ -15,6 +15,7 @@ import {
   Github,
   Globe,
   Code2,
+  Sparkles,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -50,6 +51,49 @@ export default function LibraryDetailPage() {
   const [library, setLibrary] = useState<Library | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // AI explainer — isolated state, never affects existing page logic
+  type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
+  const [aiLevel, setAiLevel]           = useState<SkillLevel | null>(null)
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null)
+  const [aiLoading, setAiLoading]       = useState(false)
+  const [aiError, setAiError]           = useState<string | null>(null)
+
+  async function explainForLevel(level: SkillLevel) {
+    if (!library) return
+    setAiLevel(level)
+    setAiExplanation(null)
+    setAiError(null)
+    setAiLoading(true)
+    try {
+      const res = await fetch('/api/ai/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level,
+          library: {
+            name: library.name,
+            shortSummary: library.shortSummary,
+            description: library.description,
+            categories: library.categories.map((c) => c.name),
+            languages: library.languages.map((l) => l.name),
+            features: library.features.map((f) => f.name),
+            isFree: library.costMinUSD === 0 || library.costMinUSD === null,
+          },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        setAiError(data.error ?? 'AI unavailable right now.')
+      } else {
+        setAiExplanation(data.explanation)
+      }
+    } catch {
+      setAiError('AI unavailable right now.')
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   useEffect(() => {
     const fetchLibrary = async () => {
@@ -406,6 +450,55 @@ export default function LibraryDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* AI explainer */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-4 w-4 text-primary" />
+                Is this right for me?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">Choose your experience level for a tailored explanation.</p>
+              <div className="flex gap-2">
+                {(['beginner', 'intermediate', 'advanced'] as SkillLevel[]).map((lvl) => (
+                  <button
+                    key={lvl}
+                    onClick={() => explainForLevel(lvl)}
+                    disabled={aiLoading}
+                    className={`flex-1 text-xs py-1.5 rounded-md border font-medium capitalize transition-colors disabled:opacity-50 ${
+                      aiLevel === lvl
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'text-muted-foreground hover:text-foreground hover:border-primary'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                ))}
+              </div>
+              {aiLoading && (
+                <p className="text-xs text-muted-foreground animate-pulse">Generating explanation…</p>
+              )}
+              {aiError && (
+                <p className="text-xs text-red-500">{aiError}</p>
+              )}
+              {aiExplanation && !aiLoading && (
+                <div className="border-t pt-3 space-y-2">
+                  {aiExplanation.split('\n').map((line, i) => {
+                    const isHeader = /^(Best for:|Why use it:|Consider:|Verdict:)/.test(line.trim())
+                    const isBullet = line.trim().startsWith('•')
+                    if (!line.trim()) return null
+                    return (
+                      <p key={i} className={`text-sm ${isHeader ? 'font-bold mt-2' : isBullet ? 'pl-2 text-muted-foreground' : ''}`}>
+                        {line}
+                      </p>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Compare link */}
           <Link href={`/compare?slugs=${library.slug}`}

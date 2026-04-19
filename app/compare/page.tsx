@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, ExternalLink, X, Plus, Code2, Globe, Github } from 'lucide-react'
+import { ArrowLeft, ExternalLink, X, Plus, Code2, Globe, Github, Sparkles } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import { SIPSelector } from '@/components/SIPSelector'
 import { formatCurrency } from '@/lib/utils'
 
@@ -57,6 +58,11 @@ export default function ComparePage() {
   const [numSlots, setNumSlots] = useState(Math.max(MIN_SLOTS, urlSlugs.length))
   const [libraries, setLibraries] = useState<(Library | null)[]>([])
   const [loading, setLoading] = useState(false)
+
+  // AI summary — isolated state, never affects comparison logic
+  const [aiSummary, setAiSummary] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   // Keep numSlots in sync when URL changes (e.g. navigating back)
   useEffect(() => {
@@ -115,6 +121,37 @@ export default function ComparePage() {
   const handleClearAll = () => {
     setNumSlots(MIN_SLOTS)
     router.push('/compare')
+  }
+
+  async function generateAiSummary() {
+    setAiSummary(null)
+    setAiError(null)
+    setAiLoading(true)
+    try {
+      const payload = loadedLibraries.map((lib) => ({
+        name: lib.name,
+        shortSummary: lib.shortSummary,
+        categories: lib.categories.map((c) => c.name),
+        languages: lib.languages.map((l) => l.name),
+        costMinUSD: lib.costMinUSD,
+        featureCount: lib.features.length,
+      }))
+      const res = await fetch('/api/ai/compare-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ libraries: payload }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        setAiError(data.error ?? 'AI summary unavailable right now.')
+      } else {
+        setAiSummary(data.summary)
+      }
+    } catch {
+      setAiError('AI summary unavailable right now.')
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   const loadedLibraries = libraries.filter((l): l is Library => l !== null)
@@ -386,6 +423,44 @@ export default function ComparePage() {
               </CardContent>
             </Card>
           )}
+
+          {/* ── AI Comparison Summary (optional enhancement) ── */}
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-5 w-5 text-primary" />
+                AI Comparison Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!aiSummary && !aiLoading && (
+                <p className="text-sm text-muted-foreground">
+                  Get an AI-generated summary of tradeoffs, beginner vs. enterprise fit, and best use cases for each library.
+                </p>
+              )}
+
+              <Button
+                onClick={generateAiSummary}
+                disabled={aiLoading}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                {aiLoading ? 'Generating AI summary…' : aiSummary ? 'Regenerate Summary' : 'Generate AI Summary'}
+              </Button>
+
+              {aiError && (
+                <p className="text-sm text-red-500">{aiError}</p>
+              )}
+
+              {aiSummary && !aiLoading && (
+                <div className="prose prose-sm max-w-none text-sm leading-relaxed pt-2 border-t">
+                  <ReactMarkdown>{aiSummary}</ReactMarkdown>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>
