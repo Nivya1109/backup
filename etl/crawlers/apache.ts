@@ -67,8 +67,14 @@ function detectLanguages(project: ApacheProject): string[] {
   return mapped.length > 0 ? [...new Set(mapped)] : ['Java']
 }
 
-async function crawlApache() {
-  console.log('\n🪶 Apache Crawler — fetching projects from projects.apache.org...\n')
+interface CrawlApacheOptions {
+  limit?: number   // max projects to process (default: 80)
+  newOnly?: boolean // skip projects already in DB, only insert genuinely new ones
+}
+
+async function crawlApache(options: CrawlApacheOptions = {}) {
+  const { limit = 80, newOnly = false } = options
+  console.log(`\n🪶 Apache Crawler — fetching projects from projects.apache.org (limit=${limit}, newOnly=${newOnly})...\n`)
 
   const res = await fetch('https://projects.apache.org/json/foundation/projects.json')
   if (!res.ok) throw new Error(`Failed to fetch Apache projects: ${res.status}`)
@@ -80,11 +86,25 @@ async function crawlApache() {
 
   // Filter: must have a name and description; skip incubating/attic
   const SKIP_KEYWORDS = ['incubat', 'attic', 'retired', 'old', 'legacy']
-  const relevant = projects.filter((p) => {
+  let relevant = projects.filter((p) => {
     if (!p.name || !p.description) return false
     const desc = (p.description || '').toLowerCase()
     return !SKIP_KEYWORDS.some((kw) => desc.includes(kw))
-  }).slice(0, 80) // limit to 80 projects
+  })
+
+  // When newOnly, remove projects already in the DB before applying limit
+  if (newOnly) {
+    const existingSlugs = new Set(
+      (await prisma.library.findMany({ where: { dataSource: 'apache-crawler' }, select: { slug: true } }))
+        .map((l) => l.slug)
+    )
+    relevant = relevant.filter((p) => {
+      const name = p.name.startsWith('Apache ') ? p.name : `Apache ${p.name}`
+      return !existingSlugs.has(slugify(name))
+    })
+  }
+
+  relevant = relevant.slice(0, limit)
 
   const apacheOrg = await prisma.organization.upsert({
     where: { name: 'Apache Software Foundation' },

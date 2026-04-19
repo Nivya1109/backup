@@ -32,7 +32,8 @@
     "crawl": "tsx etl/crawlers/run.ts",
     "crawl:npm": "tsx etl/crawlers/npm.ts",
     "crawl:pypi": "tsx etl/crawlers/pypi.ts",
-    "crawl:apache": "tsx etl/crawlers/apache.ts"
+    "crawl:apache": "tsx etl/crawlers/apache.ts",
+    "backfill:examples": "tsx etl/scripts/backfill-example-code.ts"
   },
   "dependencies": {
     "@next-auth/prisma-adapter": "^1.0.7",

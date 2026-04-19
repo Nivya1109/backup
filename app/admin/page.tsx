@@ -228,8 +228,16 @@ export default function AdminPage() {
 
   // Crawler tool state
   const [crawling, setCrawling] = useState(false)
+  type CrawlerSourceResult = { inserted: number; success: number; failed: number; error: string | null }
   type CrawlerResult = {
-    crawl?: { before: number; after: number; inserted: number; sources: { npm: number; pypi: number; apache: number }; totalInDb: number }
+    crawl?: {
+      before: number
+      after: number
+      inserted: number
+      backfilled?: number
+      sources: { npm: CrawlerSourceResult; pypi: CrawlerSourceResult; apache: CrawlerSourceResult }
+      totalInDb: number
+    }
     error?: string
   }
   const [crawlerResult, setCrawlerResult] = useState<CrawlerResult | null>(null)
@@ -631,8 +639,8 @@ export default function AdminPage() {
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  Fetches the libraries from npm, PyPI, and Apache and saves new records to the database.
-                  May take 1 to 2 minutes.
+                  Discovers a small batch of new libraries from npm, PyPI, and Apache and inserts them into the database.
+                  Also backfills real example code for existing records. Run multiple times to grow coverage.
                 </p>
 
                 {/* Crawler result display */}
@@ -653,9 +661,26 @@ export default function AdminPage() {
                               ? `${crawlerResult.crawl.inserted} new libraries added`
                               : 'No new libraries — all records already up to date'}
                             </p>
-                            <p className="text-xs opacity-75">
-                              npm +{crawlerResult.crawl.sources.npm} · PyPI +{crawlerResult.crawl.sources.pypi} · Apache +{crawlerResult.crawl.sources.apache}
-                            </p>
+                            <ul className="text-xs opacity-75 list-none space-y-0.5 mt-1">
+                              {(['npm', 'pypi', 'apache'] as const).map((src) => {
+                                const s = crawlerResult.crawl!.sources[src]
+                                const label = src === 'pypi' ? 'PyPI' : src.charAt(0).toUpperCase() + src.slice(1)
+                                return (
+                                  <li key={src}>
+                                    {label}:{' '}
+                                    {s.error
+                                      ? <span className="text-red-600">failed ({s.error})</span>
+                                      : `+${s.inserted}`
+                                    }
+                                  </li>
+                                )
+                              })}
+                              {(crawlerResult.crawl!.backfilled ?? 0) > 0 && (
+                                <li className="mt-1 text-emerald-700">
+                                  +{crawlerResult.crawl!.backfilled} example codes backfilled
+                                </li>
+                              )}
+                            </ul>
                             <p className="font-medium mt-1">
                               Total in database: {crawlerResult.crawl.totalInDb} libraries
                               {crawlerResult.crawl.inserted === 0 && ` (was ${crawlerResult.crawl.before})`}

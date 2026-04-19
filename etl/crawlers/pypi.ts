@@ -113,6 +113,15 @@ async function fetchPypiPackage(packageName: string): Promise<PypiPackageData | 
   }
 }
 
+// Extracts the first real code block from a README/description string.
+function extractExampleCode(text: string | undefined): string | null {
+  if (!text) return null
+  let m = text.match(/```(?:python|py)[ \t]*\n([\s\S]{20,}?)\n```/)
+  if (m) return m[1].trim().slice(0, 2000)
+  m = text.match(/```[ \t]*\n([\s\S]{20,}?)\n```/)
+  return m ? m[1].trim().slice(0, 2000) : null
+}
+
 function extractPypiTags(info: PypiPackageData['info'], category: string): string[] {
   // 1. Direct keywords field (space or comma separated)
   const kwString = info.keywords || ''
@@ -173,6 +182,7 @@ async function upsertLibrary(data: PypiPackageData, category: string) {
 
   // Preserve exampleCode: fetch existing value so the update block never overwrites it
   const existing = await prisma.library.findUnique({ where: { slug }, select: { exampleCode: true } })
+  const readmeCode = extractExampleCode(info.description)
 
   await prisma.library.upsert({
     where: { slug },
@@ -188,6 +198,7 @@ async function upsertLibrary(data: PypiPackageData, category: string) {
       costMaxUSD: isFree ? 0 : null,
       dataSource: 'pypi-crawler',
       tags,
+      exampleCode: readmeCode || null,
       developerId: developerId || null,
       categories: { create: [{ categoryId: cat.id }] },
       platforms: { create: platforms.map((p) => ({ platformId: p.id })) },
@@ -207,8 +218,8 @@ async function upsertLibrary(data: PypiPackageData, category: string) {
       repositoryUrl: repoUrl || undefined,
       dataSource: 'pypi-crawler',
       tags,
-      // Preserve existing exampleCode — only keep what's already in DB
-      ...(existing?.exampleCode ? { exampleCode: existing.exampleCode } : {}),
+      // Preserve existing real code; only backfill from description if currently missing
+      exampleCode: existing?.exampleCode ?? readmeCode ?? undefined,
     },
   })
 }
@@ -276,12 +287,21 @@ async function discoverNewPypiPackages(knownSlugs: Set<string>, limit: number): 
   return newCount
 }
 
-export async function crawlPyPI() {
-  console.log(`\n🐍 PyPI Crawler — fetching ${PYPI_PACKAGES.length} packages...\n`)
+interface CrawlPyPIOptions {
+  limit?: number          // max packages from curated list (default: all)
+  skipDiscovery?: boolean // skip discovery phase (default: false)
+  discoveryLimit?: number // max new packages to find via discovery (default: 50)
+}
+
+export async function crawlPyPI(options: CrawlPyPIOptions = {}) {
+  const { limit = PYPI_PACKAGES.length, skipDiscovery = false } = options
+  const packagesToProcess = PYPI_PACKAGES.slice(0, limit)
+
+  console.log(`\n🐍 PyPI Crawler — fetching ${packagesToProcess.length} packages (limit=${limit}, skipDiscovery=${skipDiscovery})...\n`)
   let success = 0
   let failed = 0
 
-  for (const { name, category } of PYPI_PACKAGES) {
+  for (const { name, category } of packagesToProcess) {
     try {
       const data = await fetchPypiPackage(name)
       if (!data) {
@@ -299,10 +319,13 @@ export async function crawlPyPI() {
     await new Promise((r) => setTimeout(r, 200))
   }
 
-  // Discovery phase — top PyPI downloads, skip any already in DB
-  const allSlugs = await prisma.library.findMany({ select: { slug: true } })
-  const knownSlugs = new Set(allSlugs.map((l) => l.slug))
-  const discovered = await discoverNewPypiPackages(knownSlugs, 50)
+  // Discovery phase — top PyPI downloads (skipped in API/batch mode)
+  let discovered = 0
+  if (!skipDiscovery) {
+    const allSlugs = await prisma.library.findMany({ select: { slug: true } })
+    const knownSlugs = new Set(allSlugs.map((l) => l.slug))
+    discovered = await discoverNewPypiPackages(knownSlugs, options.discoveryLimit ?? 50)
+  }
   success += discovered
 
   console.log(`\nPyPI done: ${success} succeeded, ${failed} failed\n`)

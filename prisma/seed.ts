@@ -5,27 +5,13 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Starting database seed — Software Library Directory...')
 
-  // -------------------------------------------------------------------------
-  // Clean existing data (order matters for foreign keys)
-  // -------------------------------------------------------------------------
-  console.log('Cleaning existing data...')
-  await prisma.libraryDep.deleteMany()
-  await prisma.feature.deleteMany()
-  await prisma.version.deleteMany()
-  await prisma.library_Platform.deleteMany()
-  await prisma.library_Category.deleteMany()
-  await prisma.library_Language.deleteMany()
-  await prisma.library.deleteMany()
-  await prisma.category.deleteMany()
-  await prisma.platform.deleteMany()
-  await prisma.language.deleteMany()
-  await prisma.developer.deleteMany()
-  await prisma.organization.deleteMany()
+  // Seed is non-destructive — never wipes existing data.
+  // All records are upserted so crawler-added libraries are always preserved.
 
   // -------------------------------------------------------------------------
   // Categories
   // -------------------------------------------------------------------------
-  console.log('Creating categories...')
+  console.log('Upserting categories...')
   const [
     catHTTP,
     catAuth,
@@ -38,37 +24,37 @@ async function main() {
     catDevOps,
     catMessaging,
   ] = await Promise.all([
-    prisma.category.create({ data: { name: 'HTTP & Networking' } }),
-    prisma.category.create({ data: { name: 'Authentication & Security' } }),
-    prisma.category.create({ data: { name: 'Database & ORM' } }),
-    prisma.category.create({ data: { name: 'UI Frameworks' } }),
-    prisma.category.create({ data: { name: 'Testing' } }),
-    prisma.category.create({ data: { name: 'Data Science & ML' } }),
-    prisma.category.create({ data: { name: 'Logging & Monitoring' } }),
-    prisma.category.create({ data: { name: 'Security & Cryptography' } }),
-    prisma.category.create({ data: { name: 'DevOps & Infrastructure' } }),
-    prisma.category.create({ data: { name: 'Messaging & Events' } }),
+    prisma.category.upsert({ where: { name: 'HTTP & Networking' },        create: { name: 'HTTP & Networking' },        update: {} }),
+    prisma.category.upsert({ where: { name: 'Authentication & Security' },create: { name: 'Authentication & Security' },update: {} }),
+    prisma.category.upsert({ where: { name: 'Database & ORM' },           create: { name: 'Database & ORM' },           update: {} }),
+    prisma.category.upsert({ where: { name: 'UI Frameworks' },            create: { name: 'UI Frameworks' },            update: {} }),
+    prisma.category.upsert({ where: { name: 'Testing' },                  create: { name: 'Testing' },                  update: {} }),
+    prisma.category.upsert({ where: { name: 'Data Science & ML' },        create: { name: 'Data Science & ML' },        update: {} }),
+    prisma.category.upsert({ where: { name: 'Logging & Monitoring' },     create: { name: 'Logging & Monitoring' },     update: {} }),
+    prisma.category.upsert({ where: { name: 'Security & Cryptography' },  create: { name: 'Security & Cryptography' },  update: {} }),
+    prisma.category.upsert({ where: { name: 'DevOps & Infrastructure' },  create: { name: 'DevOps & Infrastructure' },  update: {} }),
+    prisma.category.upsert({ where: { name: 'Messaging & Events' },       create: { name: 'Messaging & Events' },       update: {} }),
   ])
 
   // -------------------------------------------------------------------------
   // Platforms
   // -------------------------------------------------------------------------
-  console.log('Creating platforms...')
+  console.log('Upserting platforms...')
   const [platMacOS, platWindows, platLinux, platWeb, platAndroid, platIOS, platCross] =
     await Promise.all([
-      prisma.platform.create({ data: { name: 'macOS' } }),
-      prisma.platform.create({ data: { name: 'Windows' } }),
-      prisma.platform.create({ data: { name: 'Linux' } }),
-      prisma.platform.create({ data: { name: 'Web' } }),
-      prisma.platform.create({ data: { name: 'Android' } }),
-      prisma.platform.create({ data: { name: 'iOS' } }),
-      prisma.platform.create({ data: { name: 'Cross-platform' } }),
+      prisma.platform.upsert({ where: { name: 'macOS' },            create: { name: 'macOS' },            update: {} }),
+      prisma.platform.upsert({ where: { name: 'Windows' },          create: { name: 'Windows' },          update: {} }),
+      prisma.platform.upsert({ where: { name: 'Linux' },            create: { name: 'Linux' },            update: {} }),
+      prisma.platform.upsert({ where: { name: 'Web' },              create: { name: 'Web' },              update: {} }),
+      prisma.platform.upsert({ where: { name: 'Android' },          create: { name: 'Android' },          update: {} }),
+      prisma.platform.upsert({ where: { name: 'iOS' },              create: { name: 'iOS' },              update: {} }),
+      prisma.platform.upsert({ where: { name: 'Cross-platform' },   create: { name: 'Cross-platform' },   update: {} }),
     ])
 
   // -------------------------------------------------------------------------
   // Languages
   // -------------------------------------------------------------------------
-  console.log('Creating languages...')
+  console.log('Upserting languages...')
   const [
     langPython,
     langJS,
@@ -81,22 +67,22 @@ async function main() {
     langSwift,
     langKotlin,
   ] = await Promise.all([
-    prisma.language.create({ data: { name: 'Python' } }),
-    prisma.language.create({ data: { name: 'JavaScript' } }),
-    prisma.language.create({ data: { name: 'TypeScript' } }),
-    prisma.language.create({ data: { name: 'Java' } }),
-    prisma.language.create({ data: { name: 'Go' } }),
-    prisma.language.create({ data: { name: 'Rust' } }),
-    prisma.language.create({ data: { name: 'C#' } }),
-    prisma.language.create({ data: { name: 'Ruby' } }),
-    prisma.language.create({ data: { name: 'Swift' } }),
-    prisma.language.create({ data: { name: 'Kotlin' } }),
+    prisma.language.upsert({ where: { name: 'Python' },     create: { name: 'Python' },     update: {} }),
+    prisma.language.upsert({ where: { name: 'JavaScript' }, create: { name: 'JavaScript' }, update: {} }),
+    prisma.language.upsert({ where: { name: 'TypeScript' }, create: { name: 'TypeScript' }, update: {} }),
+    prisma.language.upsert({ where: { name: 'Java' },       create: { name: 'Java' },       update: {} }),
+    prisma.language.upsert({ where: { name: 'Go' },         create: { name: 'Go' },         update: {} }),
+    prisma.language.upsert({ where: { name: 'Rust' },       create: { name: 'Rust' },       update: {} }),
+    prisma.language.upsert({ where: { name: 'C#' },         create: { name: 'C#' },         update: {} }),
+    prisma.language.upsert({ where: { name: 'Ruby' },       create: { name: 'Ruby' },       update: {} }),
+    prisma.language.upsert({ where: { name: 'Swift' },      create: { name: 'Swift' },      update: {} }),
+    prisma.language.upsert({ where: { name: 'Kotlin' },     create: { name: 'Kotlin' },     update: {} }),
   ])
 
   // -------------------------------------------------------------------------
   // Developers & Organizations
   // -------------------------------------------------------------------------
-  console.log('Creating developers and organizations...')
+  console.log('Upserting developers and organizations...')
   const [
     devKennethReitz,
     devTJHolowaychuk,
@@ -109,25 +95,26 @@ async function main() {
     orgOpenJS,
     orgHashiCorp,
   ] = await Promise.all([
-    prisma.developer.create({ data: { name: 'Kenneth Reitz', url: 'https://kennethreitz.org' } }),
-    prisma.developer.create({ data: { name: 'TJ Holowaychuk', url: 'https://github.com/tj' } }),
-    prisma.developer.create({ data: { name: 'Yehuda Katz', url: 'https://yehudakatz.com' } }),
-    prisma.organization.create({ data: { name: 'Meta Open Source', url: 'https://opensource.fb.com' } }),
-    prisma.organization.create({ data: { name: 'Google', url: 'https://opensource.google' } }),
-    prisma.organization.create({ data: { name: 'Microsoft', url: 'https://opensource.microsoft.com' } }),
-    prisma.organization.create({ data: { name: 'Apache Software Foundation', url: 'https://www.apache.org' } }),
-    prisma.organization.create({ data: { name: 'Python Software Foundation', url: 'https://www.python.org' } }),
-    prisma.organization.create({ data: { name: 'OpenJS Foundation', url: 'https://openjsf.org' } }),
-    prisma.organization.create({ data: { name: 'HashiCorp', url: 'https://www.hashicorp.com' } }),
+    prisma.developer.upsert({ where: { name: 'Kenneth Reitz' },             create: { name: 'Kenneth Reitz',             url: 'https://kennethreitz.org' },          update: {} }),
+    prisma.developer.upsert({ where: { name: 'TJ Holowaychuk' },            create: { name: 'TJ Holowaychuk',            url: 'https://github.com/tj' },             update: {} }),
+    prisma.developer.upsert({ where: { name: 'Yehuda Katz' },               create: { name: 'Yehuda Katz',               url: 'https://yehudakatz.com' },            update: {} }),
+    prisma.organization.upsert({ where: { name: 'Meta Open Source' },        create: { name: 'Meta Open Source',          url: 'https://opensource.fb.com' },         update: {} }),
+    prisma.organization.upsert({ where: { name: 'Google' },                  create: { name: 'Google',                    url: 'https://opensource.google' },         update: {} }),
+    prisma.organization.upsert({ where: { name: 'Microsoft' },               create: { name: 'Microsoft',                 url: 'https://opensource.microsoft.com' },  update: {} }),
+    prisma.organization.upsert({ where: { name: 'Apache Software Foundation' }, create: { name: 'Apache Software Foundation', url: 'https://www.apache.org' },        update: {} }),
+    prisma.organization.upsert({ where: { name: 'Python Software Foundation' }, create: { name: 'Python Software Foundation', url: 'https://www.python.org' },        update: {} }),
+    prisma.organization.upsert({ where: { name: 'OpenJS Foundation' },       create: { name: 'OpenJS Foundation',         url: 'https://openjsf.org' },               update: {} }),
+    prisma.organization.upsert({ where: { name: 'HashiCorp' },               create: { name: 'HashiCorp',                 url: 'https://www.hashicorp.com' },         update: {} }),
   ])
 
   // -------------------------------------------------------------------------
   // Libraries
   // -------------------------------------------------------------------------
-  console.log('Creating libraries...')
+  console.log('Upserting libraries...')
 
   // 1. requests (Python HTTP)
-  const libRequests = await prisma.library.create({
+  const libRequests = await prisma.library.findUnique({ where: { slug: 'requests' } })
+    ?? await prisma.library.create({
     data: {
       name: 'requests',
       slug: 'requests',
@@ -185,7 +172,8 @@ print(response.status_code)`,
   })
 
   // 2. axios (JavaScript HTTP)
-  const libAxios = await prisma.library.create({
+  const libAxios = await prisma.library.findUnique({ where: { slug: 'axios' } })
+    ?? await prisma.library.create({
     data: {
       name: 'axios',
       slug: 'axios',
@@ -251,7 +239,8 @@ try {
   })
 
   // 3. React
-  const libReact = await prisma.library.create({
+  const libReact = await prisma.library.findUnique({ where: { slug: 'react' } })
+    ?? await prisma.library.create({
     data: {
       name: 'React',
       slug: 'react',
@@ -314,7 +303,8 @@ export default Counter;`,
   })
 
   // 4. SQLAlchemy
-  const libSQLAlchemy = await prisma.library.create({
+  const libSQLAlchemy = await prisma.library.findUnique({ where: { slug: 'sqlalchemy' } })
+    ?? await prisma.library.create({
     data: {
       name: 'SQLAlchemy',
       slug: 'sqlalchemy',
@@ -377,7 +367,8 @@ with Session(engine) as session:
   })
 
   // 5. Jest
-  const libJest = await prisma.library.create({
+  const libJest = await prisma.library.findUnique({ where: { slug: 'jest' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Jest',
       slug: 'jest',
@@ -442,7 +433,8 @@ test('fetches user data', async () => {
   })
 
   // 6. NumPy
-  const libNumPy = await prisma.library.create({
+  const libNumPy = await prisma.library.findUnique({ where: { slug: 'numpy' } })
+    ?? await prisma.library.create({
     data: {
       name: 'NumPy',
       slug: 'numpy',
@@ -502,7 +494,8 @@ eigenvalues = np.linalg.eigvals(matrix)`,
   })
 
   // 7. Passport.js
-  const libPassport = await prisma.library.create({
+  const libPassport = await prisma.library.findUnique({ where: { slug: 'passport-js' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Passport.js',
       slug: 'passport-js',
@@ -567,7 +560,8 @@ app.get('/profile', passport.authenticate('jwt'), (req, res) => {
   })
 
   // 8. Pandas
-  const libPandas = await prisma.library.create({
+  const libPandas = await prisma.library.findUnique({ where: { slug: 'pandas' } })
+    ?? await prisma.library.create({
     data: {
       name: 'pandas',
       slug: 'pandas',
@@ -629,7 +623,8 @@ top_products.to_csv('top_products.csv')`,
   })
 
   // 9. Winston (Logging)
-  const libWinston = await prisma.library.create({
+  const libWinston = await prisma.library.findUnique({ where: { slug: 'winston' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Winston',
       slug: 'winston',
@@ -690,7 +685,8 @@ logger.error('Database connection failed', { error: err.message });`,
   })
 
   // 10. bcrypt (Security)
-  const libBcrypt = await prisma.library.create({
+  const libBcrypt = await prisma.library.findUnique({ where: { slug: 'bcrypt' } })
+    ?? await prisma.library.create({
     data: {
       name: 'bcrypt',
       slug: 'bcrypt',
@@ -753,7 +749,8 @@ console.log(valid); // true`,
   })
 
   // 11. TensorFlow.js
-  const libTFJS = await prisma.library.create({
+  const libTFJS = await prisma.library.findUnique({ where: { slug: 'tensorflow-js' } })
+    ?? await prisma.library.create({
     data: {
       name: 'TensorFlow.js',
       slug: 'tensorflow-js',
@@ -817,7 +814,8 @@ prediction.print();`,
   })
 
   // 12. Mongoose (MongoDB ORM)
-  const libMongoose = await prisma.library.create({
+  const libMongoose = await prisma.library.findUnique({ where: { slug: 'mongoose' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Mongoose',
       slug: 'mongoose',
@@ -878,7 +876,8 @@ const users = await User.find({ name: /alice/i }).limit(10);`,
   })
 
   // 13. Playwright (Testing)
-  const libPlaywright = await prisma.library.create({
+  const libPlaywright = await prisma.library.findUnique({ where: { slug: 'playwright' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Playwright',
       slug: 'playwright',
@@ -937,7 +936,8 @@ test('user can log in', async ({ page }) => {
   })
 
   // 14. Loguru (Python logging)
-  const libLoguru = await prisma.library.create({
+  const libLoguru = await prisma.library.findUnique({ where: { slug: 'loguru' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Loguru',
       slug: 'loguru',
@@ -992,7 +992,8 @@ logger.bind(request_id="abc123").info("Processing request")`,
   })
 
   // 15. Prisma (ORM) — meta!
-  const libPrisma = await prisma.library.create({
+  const libPrisma = await prisma.library.findUnique({ where: { slug: 'prisma' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Prisma',
       slug: 'prisma',
@@ -1056,7 +1057,8 @@ const newPost = await prisma.post.create({
   })
 
   // 16. Express.js
-  const libExpress = await prisma.library.create({
+  const libExpress = await prisma.library.findUnique({ where: { slug: 'express' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Express',
       slug: 'express',
@@ -1119,7 +1121,8 @@ app.listen(3000, () => console.log('Server running on port 3000'));`,
   })
 
   // 17. Terraform (DevOps)
-  const libTerraform = await prisma.library.create({
+  const libTerraform = await prisma.library.findUnique({ where: { slug: 'terraform' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Terraform',
       slug: 'terraform',
@@ -1181,7 +1184,8 @@ output "instance_ip" {
   })
 
   // 18. Vue.js
-  const libVue = await prisma.library.create({
+  const libVue = await prisma.library.findUnique({ where: { slug: 'vue-js' } })
+    ?? await prisma.library.create({
     data: {
       name: 'Vue.js',
       slug: 'vue-js',
@@ -1237,7 +1241,8 @@ function increment() {
   })
 
   // 19. Kafka client (Messaging)
-  const libKafkaJS = await prisma.library.create({
+  const libKafkaJS = await prisma.library.findUnique({ where: { slug: 'kafkajs' } })
+    ?? await prisma.library.create({
     data: {
       name: 'KafkaJS',
       slug: 'kafkajs',
@@ -1304,7 +1309,8 @@ await consumer.run({
   })
 
   // 20. PyTest
-  const libPyTest = await prisma.library.create({
+  const libPyTest = await prisma.library.findUnique({ where: { slug: 'pytest' } })
+    ?? await prisma.library.create({
     data: {
       name: 'pytest',
       slug: 'pytest',
@@ -1375,7 +1381,8 @@ def db_connection():
   })
 
   // 21. NextAuth.js
-  const libNextAuth = await prisma.library.create({
+  const libNextAuth = await prisma.library.findUnique({ where: { slug: 'next-auth' } })
+    ?? await prisma.library.create({
     data: {
       name: 'next-auth',
       slug: 'next-auth',

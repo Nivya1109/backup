@@ -90,6 +90,7 @@ interface NpmPackageData {
   author?: { name?: string } | string
   license?: string
   keywords?: string[]
+  readme?: string
   dist?: { tarball?: string }
   'dist-tags'?: { latest?: string }
   versions?: Record<string, { description?: string; homepage?: string; repository?: { url?: string }; author?: { name?: string } | string; license?: string }>
@@ -103,6 +104,18 @@ function extractAuthor(author: NpmPackageData['author']): string | null {
   if (!author) return null
   if (typeof author === 'string') return author.split('<')[0].trim() || null
   return author.name || null
+}
+
+// Extracts the first real code block from a README/markdown string.
+// Returns null rather than a template string if nothing found.
+function extractExampleCode(text: string | undefined): string | null {
+  if (!text) return null
+  // Prefer language-tagged JS/TS blocks
+  let m = text.match(/```(?:js|javascript|ts|typescript|jsx|tsx)[ \t]*\n([\s\S]{20,}?)\n```/)
+  if (m) return m[1].trim().slice(0, 2000)
+  // Fall back to any fenced block with at least 20 chars
+  m = text.match(/```[ \t]*\n([\s\S]{20,}?)\n```/)
+  return m ? m[1].trim().slice(0, 2000) : null
 }
 
 function extractRepoUrl(repo: NpmPackageData['repository']): string | null {
@@ -173,6 +186,7 @@ async function upsertLibrary(pkgData: NpmPackageData, category: string) {
 
   // Preserve exampleCode: fetch existing value so the update block never overwrites it
   const existing = await prisma.library.findUnique({ where: { slug }, select: { exampleCode: true } })
+  const readmeCode = extractExampleCode(pkgData.readme)
 
   // Upsert library
   await prisma.library.upsert({
@@ -189,6 +203,7 @@ async function upsertLibrary(pkgData: NpmPackageData, category: string) {
       costMaxUSD: isFree ? 0 : null,
       dataSource: 'npm-crawler',
       tags,
+      exampleCode: readmeCode || null,
       developerId: developerId || null,
       categories: { create: [{ categoryId: cat.id }] },
       platforms: { create: platforms.map((p) => ({ platformId: p.id })) },
@@ -207,8 +222,8 @@ async function upsertLibrary(pkgData: NpmPackageData, category: string) {
       repositoryUrl: repoUrl || undefined,
       dataSource: 'npm-crawler',
       tags,
-      // Preserve existing exampleCode — only keep what's already in DB
-      ...(existing?.exampleCode ? { exampleCode: existing.exampleCode } : {}),
+      // Preserve existing real code; only backfill from README if currently missing
+      exampleCode: existing?.exampleCode ?? readmeCode ?? undefined,
     },
   })
 }
@@ -274,12 +289,21 @@ async function discoverNewNpmPackages(knownNames: Set<string>, limit: number): P
   return newCount
 }
 
-export async function crawlNpm() {
-  console.log(`\n📦 NPM Crawler — fetching ${NPM_PACKAGES.length} packages...\n`)
+interface CrawlNpmOptions {
+  limit?: number          // max packages from curated list (default: all)
+  skipDiscovery?: boolean // skip discovery phase (default: false)
+  discoveryLimit?: number // max new packages to find via discovery (default: 60)
+}
+
+export async function crawlNpm(options: CrawlNpmOptions = {}) {
+  const { limit = NPM_PACKAGES.length, skipDiscovery = false } = options
+  const packagesToProcess = NPM_PACKAGES.slice(0, limit)
+
+  console.log(`\n📦 NPM Crawler — fetching ${packagesToProcess.length} packages (limit=${limit}, skipDiscovery=${skipDiscovery})...\n`)
   let success = 0
   let failed = 0
 
-  for (const { name, category } of NPM_PACKAGES) {
+  for (const { name, category } of packagesToProcess) {
     try {
       const data = await fetchNpmPackage(name)
       if (!data) {
@@ -298,10 +322,13 @@ export async function crawlNpm() {
     await new Promise((r) => setTimeout(r, 150))
   }
 
-  // Discovery phase — find packages not already in DB
-  const allNames = await prisma.library.findMany({ select: { name: true } })
-  const knownNames = new Set(allNames.map((l) => l.name))
-  const discovered = await discoverNewNpmPackages(knownNames, 60)
+  // Discovery phase — find packages not already in DB (skipped in API/batch mode)
+  let discovered = 0
+  if (!skipDiscovery) {
+    const allNames = await prisma.library.findMany({ select: { name: true } })
+    const knownNames = new Set(allNames.map((l) => l.name))
+    discovered = await discoverNewNpmPackages(knownNames, options.discoveryLimit ?? 60)
+  }
   success += discovered
 
   console.log(`\nNPM done: ${success} succeeded, ${failed} failed\n`)
