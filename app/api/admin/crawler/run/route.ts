@@ -8,13 +8,13 @@ import { crawlApache } from '@/etl/crawlers/apache'
 
 export const dynamic = 'force-dynamic'
 
-// New libraries to discover per source per run (total ≤ ~6)
-const PER_SOURCE_NEW = 2
+// New libraries to discover per source per run (total ≤ ~3)
+const PER_SOURCE_NEW = 1
 // Existing records with no exampleCode to backfill per run
 // Kept low: each backfill is 1–2 s of network I/O; Render proxy timeout is ~30 s
-const BACKFILL_LIMIT = 4
-// Hard wall: always respond before Render's proxy kills the connection at ~30 s
-const ROUTE_TIMEOUT_MS = 25_000
+const BACKFILL_LIMIT = 2
+// Hard wall: respond well before Render's proxy kills at ~30 s (accounts for cold starts)
+const ROUTE_TIMEOUT_MS = 18_000
 
 // Extracts the first real code block from markdown — same logic as the crawlers.
 function extractCode(text: string | undefined): string | null {
