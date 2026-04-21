@@ -54,6 +54,7 @@ export default function LibraryDetailPage() {
 
   // AI explainer — isolated state, never affects existing page logic
   type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
+  const [aiOpen, setAiOpen]             = useState(false)
   const [aiLevel, setAiLevel]           = useState<SkillLevel | null>(null)
   const [aiExplanation, setAiExplanation] = useState<string | null>(null)
   const [aiLoading, setAiLoading]       = useState(false)
@@ -290,6 +291,15 @@ export default function LibraryDetailPage() {
                 </CardContent>
               </Card>
 
+              {/* AI explainer trigger */}
+              <button
+                onClick={() => setAiOpen(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary text-sm font-medium py-2.5 transition-colors"
+              >
+                <Sparkles className="h-4 w-4" />
+                Is this right for me?
+              </button>
+
               {library.dependencies.length > 0 && (
                 <Card>
                   <CardHeader>
@@ -451,15 +461,38 @@ export default function LibraryDetailPage() {
             </Card>
           )}
 
-          {/* AI explainer */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
+          {/* Compare link */}
+          <Link href={`/compare?slugs=${library.slug}`}
+            className="block border rounded-lg p-4 text-center text-sm font-medium hover:bg-accent transition-colors">
+            Compare with another library →
+          </Link>
+        </div>
+      </div>
+
+      {/* AI explainer modal */}
+      {aiOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setAiOpen(false) }}
+        >
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+              <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                Is this right for me?
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+                <h2 className="font-semibold text-base">Is this right for me?</h2>
+              </div>
+              <button
+                onClick={() => setAiOpen(false)}
+                className="text-muted-foreground hover:text-foreground text-xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="overflow-y-auto px-5 py-4 space-y-4">
               <p className="text-xs text-muted-foreground">Choose your experience level for a tailored explanation.</p>
               <div className="flex gap-2">
                 {(['beginner', 'intermediate', 'advanced'] as SkillLevel[]).map((lvl) => (
@@ -486,7 +519,7 @@ export default function LibraryDetailPage() {
               {aiExplanation && !aiLoading && (
                 <div className="border-t pt-3 space-y-2">
                   {aiExplanation.split('\n').map((line, i) => {
-                    const isHeader = /^(Best for:|Why use it:|Consider:|Verdict:)/.test(line.trim())
+                    const isHeader = /^(Overview:|Best for:|Why use it:|Consider:|Verdict:)/.test(line.trim())
                     const isBullet = line.trim().startsWith('•')
                     if (!line.trim()) return null
                     return (
@@ -497,16 +530,10 @@ export default function LibraryDetailPage() {
                   })}
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Compare link */}
-          <Link href={`/compare?slugs=${library.slug}`}
-            className="block border rounded-lg p-4 text-center text-sm font-medium hover:bg-accent transition-colors">
-            Compare with another library →
-          </Link>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

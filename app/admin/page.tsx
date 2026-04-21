@@ -63,20 +63,12 @@ const STATUS_COLORS: Record<string, string> = {
 function TicketRow({
   ticket,
   onStatusChange,
-  onReplied,
 }: {
   ticket: SupportTicket
   onStatusChange: (id: string, status: string) => void
-  onReplied: (id: string, reply: string, repliedAt: string) => void
 }) {
   const [expanded, setExpanded]     = useState(false)
   const [updating, setUpdating]     = useState(false)
-  const [showReply, setShowReply]   = useState(false)
-  const [replyText, setReplyText]   = useState('')
-  const [sending, setSending]       = useState(false)
-  const [replyError, setReplyError] = useState('')
-  const [sent, setSent]             = useState(false)
-
   async function cycleStatus() {
     const next = ticket.status === 'open' ? 'in_progress'
                : ticket.status === 'in_progress' ? 'resolved'
@@ -91,40 +83,6 @@ function TicketRow({
       if (res.ok) onStatusChange(ticket.id, next)
     } finally {
       setUpdating(false)
-    }
-  }
-
-  async function submitReply() {
-    if (!replyText.trim()) return
-    setSending(true)
-    setReplyError('')
-    try {
-      const res = await fetch(`/api/support/${ticket.id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ adminReply: replyText }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        onReplied(ticket.id, replyText.trim(), data.ticket?.repliedAt ?? new Date().toISOString())
-        onStatusChange(ticket.id, 'resolved')
-        setShowReply(false)
-        setReplyText('')
-        setSent(true)
-        // Collapse after 2 seconds so "Sent ✓" is visible briefly then disappears
-        setTimeout(() => {
-          setSent(false)
-          setExpanded(false)
-        }, 2000)
-      } else {
-        console.error('Reply failed:', res.status, data)
-        setReplyError(data?.error ?? `Error ${res.status}`)
-      }
-    } catch (err) {
-      console.error('Reply network error:', err)
-      setReplyError('Network error — please try again')
-    } finally {
-      setSending(false)
     }
   }
 
@@ -166,51 +124,6 @@ function TicketRow({
             {ticket.message}
           </p>
 
-          {/* Sent flash — visible for 2s after submit, gone on reload */}
-          {sent ? (
-            <p className="text-xs text-emerald-600 font-medium">Sent ✓</p>
-          ) : ticket.adminReply ? (
-            /* Already replied — no form, no persistent box */
-            null
-          ) : (
-            /* Reply form */
-            showReply ? (
-              <div className="space-y-2">
-                <textarea
-                  value={replyText}
-                  onChange={(e) => { setReplyText(e.target.value); setReplyError('') }}
-                  placeholder="Type your reply…"
-                  rows={3}
-                  className="w-full text-sm border rounded p-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                {replyError && (
-                  <p className="text-xs text-red-500">{replyError}</p>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={submitReply}
-                    disabled={sending || !replyText.trim()}
-                    className="text-xs px-3 py-1 rounded bg-primary text-primary-foreground font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
-                  >
-                    {sending ? 'Sending…' : 'Send Reply'}
-                  </button>
-                  <button
-                    onClick={() => { setShowReply(false); setReplyText(''); setReplyError('') }}
-                    className="text-xs px-3 py-1 rounded border text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowReply(true)}
-                className="text-xs px-3 py-1 rounded border border-primary text-primary font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
-              >
-                Reply
-              </button>
-            )
-          )}
         </div>
       )}
     </div>
@@ -458,11 +371,6 @@ export default function AdminPage() {
                       onStatusChange={(id, status) => {
                         setTickets((prev) => prev.map((t) => t.id === id ? { ...t, status } : t))
                       }}
-                      onReplied={(id, reply, repliedAt) => {
-                        setTickets((prev) => prev.map((t) =>
-                          t.id === id ? { ...t, adminReply: reply, repliedAt, status: 'resolved' } : t
-                        ))
-                      }}
                     />
                   ))}
               </div>
@@ -645,7 +553,6 @@ export default function AdminPage() {
 
                 <p className="text-xs text-muted-foreground">
                   Discovers a small batch of new libraries from npm, PyPI, and Apache and inserts them into the database.
-                  Also backfills real example code for existing records. Run multiple times to grow coverage.
                 </p>
 
                 {/* Crawler result display */}

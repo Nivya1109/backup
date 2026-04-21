@@ -56,6 +56,10 @@ IMPORTANT RULES:
 
 FORMAT (follow exactly):
 
+Overview:
+• One sentence explaining what this library does
+• One sentence on who typically uses it
+
 Best for:
 • ...
 • ...
@@ -80,7 +84,7 @@ Verdict:
       },
       body: JSON.stringify({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 250,
+        max_tokens: 320,
         temperature: 0.4,
         messages: [{ role: 'user', content: prompt }],
       }),
